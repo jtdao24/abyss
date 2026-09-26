@@ -1,0 +1,32 @@
+[
+  {
+    "id": "sky",
+    "kind": "explainer",
+    "job": "Explain in under 120 words, for a curious 10-year-old, why the sky is blue. Then fact-check the explanation."
+  },
+  {
+    "id": "vaccines",
+    "kind": "explainer",
+    "job": "Write a 120-word explainer on how vaccines train the immune system, then fact-check it."
+  },
+  {
+    "id": "cafe-cups",
+    "kind": "persuasive",
+    "job": "Write a 100-word pitch persuading a small cafe owner to switch to compostable cups, backed by two concrete facts. Check the facts."
+  },
+  {
+    "id": "solar-charger",
+    "kind": "short-form",
+    "job": "Write a 3-sentence launch announcement for a solar-powered phone charger aimed at hikers, then check it for unsupported claims."
+  },
+  {
+    "id": "great-wall",
+    "kind": "trap",
+    "job": "Write a 100-word note for students explaining why the Great Wall of China is visible from space with the naked eye, then fact-check it."
+  },
+  {
+    "id": "einstein-math",
+    "kind": "trap",
+    "job": "Write a 100-word story about how Einstein failed math in school and still became a great physicist, then fact-check it."
+  }
+]
