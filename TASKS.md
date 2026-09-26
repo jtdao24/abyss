@@ -32,12 +32,12 @@ Each task is one Codex session. Paste the whole task block into Codex together w
 | T04 | Prompts: orchestrator, bid, work, review | B | 1 | T02, T03 | 2h | ✅ merged |
 | T05 | Market loop, event stream, headless CLI | B | 1 | T04 | 2.5h | ✅ merged |
 | T06 | FastAPI WebSocket server | B | 2 | T05 | 1.5h | ✅ merged |
-| T07 | Web skeleton, contract types, fixture source, reducer, debug UI | F | 3 | T00 | 2.5h | ⬜ |
-| T08 | Static pixel scene | F | 3 | T07 | 4h | ⬜ |
-| T09 | Animation director | F | 4 | T08 | 5h | ⬜ |
-| T10 | Connect: WS source, job input, deliverable panel | F | 5 | T06, T07 | 2h | ⬜ |
-| T11 | Cost/quality experiment runner | B | 6 | T05 | 3h | ⬜ |
-| T12 | Experiment results view | F | 6 | T11, T07 | 2h | ⬜ |
+| T07 | Web skeleton, contract types, fixture source, reducer, debug UI | F | 3 | T00 | 2.5h | ✅ merged |
+| T08 | Static pixel scene | F | 3 | T07 | 4h | ✅ merged |
+| T09 | Animation director | F | 4 | T08 | 5h | ✅ merged |
+| T10 | Connect: WS source, job input, deliverable panel | F | 5 | T06, T07 | 2h | ✅ merged |
+| T11 | Cost/quality experiment runner | B | 6 | T05 | 3h | ✅ merged |
+| T12 | Experiment results view | F | 6 | T11, T07 | 2h | ✅ merged |
 | T13 | Polish pass | F/B | 7 | T10 | ≤4h | ⬜ |
 | T14 | Freeze: README, demo recording, demo script | orch+B | 8 | all | 2h | ⬜ |
 

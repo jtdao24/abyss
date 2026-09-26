@@ -262,3 +262,25 @@ th { color: #7fb7b6; }
   .job-bar { grid-template-columns: 1fr; }
   .debug-panel { height: auto; border-left: 0; border-top: 4px solid #223e4f; }
 }
+
+/* ---- results view (T12) ---- */
+.results { max-width: 980px; margin: 0 auto; padding: 24px 16px 48px; }
+.results h1 { margin: 0; color: #f6d783; font-size: 20px; }
+.results p { color: #b9ccd3; font-size: 11px; }
+.results code { color: #f6d783; }
+.results-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.headline { display: flex; flex-wrap: wrap; gap: 10px; }
+.headline div { display: grid; gap: 4px; padding: 10px 12px; background: #142d3f; border: 2px solid #294a5d; font-size: 10px; }
+.headline strong { color: #f6d783; }
+.chart { width: 100%; height: auto; background: #102333; border: 2px solid #223e4f; font-family: "Silkscreen", monospace; }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 8px; color: #b9ccd3; font-size: 9px; }
+.legend i, td i.square { display: inline-block; width: 9px; height: 9px; margin-right: 6px; vertical-align: -1px; }
+.legend i.dot { border-radius: 50%; }
+.legend i.square, td i.square { border-radius: 2px; }
+.curves { display: flex; flex-wrap: wrap; gap: 12px; }
+.curve, .heatmap { margin: 0; padding: 8px; background: #102333; border: 2px solid #223e4f; }
+.curve svg { width: 180px; height: 70px; }
+.heatmap svg { width: 190px; }
+.curve figcaption, .heatmap figcaption { color: #b9ccd3; font-size: 9px; margin-bottom: 4px; }
+.curve svg, .heatmap svg { font-family: "Silkscreen", monospace; }
+.footnote { margin-top: 8px; }
