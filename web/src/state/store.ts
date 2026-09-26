@@ -1,5 +1,5 @@
 import type { AbyssEvent } from "../contract";
-import { initialState, reduce, setConnected, type MarketState } from "./reducer";
+import { collectResult, initialState, reduce, setConnected, type MarketState } from "./reducer";
 
 type Listener = () => void;
 
@@ -7,6 +7,7 @@ export interface MarketStore {
   getState(): MarketState;
   dispatch(event: AbyssEvent): void;
   setConnected(connected: boolean): void;
+  collectResult(): void;
   subscribe(listener: Listener): () => void;
 }
 
@@ -21,6 +22,10 @@ export function createStore(start: MarketState = initialState): MarketStore {
     },
     setConnected(connected) {
       state = setConnected(state, connected);
+      listeners.forEach((listener) => listener());
+    },
+    collectResult() {
+      state = collectResult(state);
       listeners.forEach((listener) => listener());
     },
     subscribe(listener) {

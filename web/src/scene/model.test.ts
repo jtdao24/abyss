@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import fixture from "../../public/fixtures/fake_run.json";
 import type { AbyssEvent } from "../contract";
-import { initialState, reduce, type MarketState } from "../state/reducer";
+import { collectResult, initialState, reduce, type MarketState } from "../state/reducer";
 import { sceneModel } from "./model";
 
 const events = fixture as AbyssEvent[];
@@ -41,7 +41,7 @@ describe("sceneModel", () => {
     const model = sceneModel(state);
     expect(model.reviewing).toBe(true);
     expect(model.review).toBeNull();
-    expect(model.captain).toBe("3 TASKS POSTED");
+    expect(model.mainAgent).toBe("3 TASKS POSTED");
   });
 
   it("marks an overpromise as a bad review", () => {
@@ -56,7 +56,15 @@ describe("sceneModel", () => {
     expect(model.spent).toBe("SPENT $0.0693");
     expect(model.review).toEqual({ text: "T3 9/10", tone: "ok" });
     expect(model.reviewing).toBe(false);
-    expect(model.captain).toBe("JOB DONE!");
+    expect(model.mainAgent).toBe("YOUR JOB IS READY!");
+    expect(model.resultReady).toBe(true);
+  });
+
+  it("stops announcing the result once the player collects it", () => {
+    const done = events.reduce(reduce, initialState);
+    const model = sceneModel(collectResult(done));
+    expect(model.resultReady).toBe(false);
+    expect(model.mainAgent).toBe("ANY MORE JOBS?");
   });
 
   it("renders an empty market before any job", () => {
@@ -64,6 +72,6 @@ describe("sceneModel", () => {
     expect(model.stalls).toHaveLength(3);
     expect(model.cards).toEqual([]);
     expect(model.banner).toBe("WAITING FOR A JOB");
-    expect(model.captain).toBe("MAIN AGENT");
+    expect(model.mainAgent).toBe("MAIN AGENT");
   });
 });

@@ -9,10 +9,10 @@ export const MAX_CARDS = 5;
 
 /** Public stall names. The market never shows which model runs a stall;
  *  the real model names only appear in the (hidden) ledger panel. */
-export const VENDOR: Record<AgentId, { name: string; tier: string }> = {
-  opus: { name: "VENDOR 1", tier: "PREMIUM" },
-  sonnet: { name: "VENDOR 2", tier: "PREMIUM" },
-  haiku: { name: "VENDOR 3", tier: "BUDGET" },
+export const VENDOR: Record<AgentId, { name: string; tier: string; color: string }> = {
+  opus: { name: "VENDOR 1", tier: "PREMIUM", color: "#2f6fd6" },   // blue stall
+  sonnet: { name: "VENDOR 2", tier: "PREMIUM", color: "#d64545" }, // red stall
+  haiku: { name: "VENDOR 3", tier: "BUDGET", color: "#8a4fd0" },   // purple stall
 };
 
 export type BubbleTone = "thinking" | "bid" | "pass" | "won" | "working" | "done";
@@ -47,7 +47,9 @@ export interface SceneModel {
   /** The reviewer is grading the current task right now. */
   reviewing: boolean;
   /** What the main agent (orchestrator) says. */
-  captain: string;
+  mainAgent: string;
+  /** A finished result is waiting at the mainAgent for the player to collect. */
+  resultReady: boolean;
   finalBanner: string | null;
 }
 
@@ -112,7 +114,7 @@ export function sceneModel(state: MarketState): SceneModel {
 
   const cards = state.taskOrder.slice(0, MAX_CARDS).map((taskId): CardModel => {
     const view = state.tasks[taskId];
-    const winner = view.winner ? state.agents[view.winner] : undefined;
+    const winner = view.winner ? VENDOR[view.winner] : undefined;
     return {
       taskId,
       type: view.type,
@@ -146,8 +148,11 @@ export function sceneModel(state: MarketState): SceneModel {
     ? `JOB ${state.final.status.toUpperCase()} - GRADE ${state.final.mean_grade ?? "-"} - $${state.final.total_cost_usd.toFixed(4)}`
     : null;
 
-  const captain = state.final
-    ? "JOB DONE!"
+  const resultReady = state.final !== null && !state.resultCollected;
+  const mainAgent = resultReady
+    ? "YOUR JOB IS READY!"
+    : state.final
+      ? "ANY MORE JOBS?"
     : state.taskOrder.length > 0
       ? `${state.taskOrder.length} TASKS POSTED`
       : state.currentJob || state.jobActive
@@ -161,7 +166,8 @@ export function sceneModel(state: MarketState): SceneModel {
     spent: `SPENT $${total.toFixed(4)}`,
     review,
     reviewing: task?.status === "done",
-    captain,
+    mainAgent,
+    resultReady,
     finalBanner,
   };
 }

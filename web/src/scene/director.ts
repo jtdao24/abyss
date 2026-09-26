@@ -1,24 +1,20 @@
-// Event-driven motion on top of the state-driven scene: a courier carries each
-// task crate hub → winning stall → Task Delivery, plus pops, coins and floating
-// numbers. Skipping all of it never changes what MarketScene.render(state) shows.
-import { Container, Graphics, type Text, type Ticker } from "pixi.js";
+// Moves people in response to events, on top of the state-driven scene:
+//   task posted -> every vendor walks out to the boat to hear it and bid
+//   won         -> the winner carries the task back to its stall, the rest go home
+//   done        -> the winner walks its work to the reviewer on the pier
+//   graded      -> the winner walks home
+// plus pops, coins and floating numbers. Skipping all of it never changes what
+// MarketScene.render(state) shows.
+import { Container, Graphics, type Sprite, type Text, type Ticker } from "pixi.js";
 
-import type { AbyssEvent } from "../contract";
-import {
-  COURIER_HOME,
-  DELIVERY_SPOT,
-  HUB_SPOT,
-  OFFICER,
-  PALETTE,
-  SPENT_POS,
-  STALLS,
-  WORLD,
-  text,
-  type MarketScene,
-} from "./Scene";
+import type { AbyssEvent, AgentId } from "../contract";
+import { AGENT_ORDER } from "./model";
+import { PALETTE, SPENT_POS, text, type MarketScene } from "./Scene";
+import { MAIN_AGENT_POS, REVIEWER_POS, REVIEW_SPOT, STALLS, WORLD, route, type Point } from "./world";
 
-const MAX_ACTIVE = 60; // backlog guard: beyond this, finish every effect instantly
-const COURIER_SPEED = 520; // world px per second at speed 1
+const MAX_ACTIVE = 60;    // backlog guard: beyond this, finish every effect instantly
+const WALK_SPEED = 330;   // world px per second at speed 1
+const MAX_QUEUED = 8;     // a vendor further behind than this jumps to its last stop
 
 interface Tween {
   elapsed: number;
@@ -27,19 +23,27 @@ interface Tween {
   update(progress: number): void;
 }
 
-type Point = { x: number; y: number };
-
 const ease = (p: number) => 1 - (1 - p) * (1 - p);
 
 export class Director {
   private readonly tweens: Tween[] = [];
-  private readonly route: Point[] = [];
-  private walkClock = 0;
+  private readonly routes = {} as Record<AgentId, Point[]>;
+  private readonly carrying = {} as Record<AgentId, Graphics>;
+  private clock = 0;
 
   constructor(
     private readonly scene: MarketScene,
     private readonly speed = 1,
   ) {
+    for (const agentId of AGENT_ORDER) {
+      this.routes[agentId] = [];
+      // a little task scroll a vendor carries between the boat and its stall
+      const scroll = new Graphics().roundRect(-8, -5, 16, 10, 2).fill(PALETTE.cream)
+        .rect(-8, -5, 3, 10).fill("#b07a45").rect(5, -5, 3, 10).fill("#b07a45");
+      scroll.visible = false;
+      this.carrying[agentId] = scroll;
+      scene.fx.addChild(scroll);
+    }
     scene.app.ticker.add(this.tick);
   }
 
@@ -51,90 +55,104 @@ export class Director {
   onEvent(ev: AbyssEvent): void {
     switch (ev.type) {
       case "job_split":
-        this.floatText("NEW JOB!", PALETTE.gold, HUB_SPOT.x, 400, 1100, 44);
+        this.floatText("NEW JOB!", PALETTE.gold, MAIN_AGENT_POS.x, MAIN_AGENT_POS.y - 90, 1300, 20);
         break;
       case "task_posted":
-        this.floatText(`TASK ${ev.data.index + 1}/${ev.data.total}`, PALETTE.paper, HUB_SPOT.x, 640, 1000, 32);
-        this.walk([HUB_SPOT]);
+        for (const agentId of AGENT_ORDER) this.walk(agentId, STALLS[agentId].gather);
         break;
       case "bid":
-        if (ev.data.ok) this.burst(STALLS[ev.data.agent_id].front.x, STALLS[ev.data.agent_id].front.y, PALETTE.paper, 70);
+        if (ev.data.ok) {
+          const v = this.scene.vendors[ev.data.agent_id];
+          this.burst(v.x, v.y - 60, PALETTE.paper, 22);
+        }
         break;
       case "won": {
-        const stall = STALLS[ev.data.agent_id];
-        this.burst(stall.front.x, 900, PALETTE.gold, 150);
-        this.floatText("SOLD!", PALETTE.gold, stall.front.x, 860, 1300, 56);
-        this.walk([HUB_SPOT, { x: stall.front.x, y: stall.front.y + 70 }]);
+        const v = this.scene.vendors[ev.data.agent_id];
+        this.burst(v.x, v.y - 40, PALETTE.gold, 40);
+        this.floatText("GOT IT!", PALETTE.gold, v.x, v.y - 90, 1200, 18);
+        this.carrying[ev.data.agent_id].visible = true;
+        for (const agentId of AGENT_ORDER) this.walk(agentId, STALLS[agentId].home);
         break;
       }
       case "done": {
-        const stall = STALLS[ev.data.agent_id];
-        const coins = Math.max(1, Math.min(20, Math.round(ev.data.usage.cost_usd * 1000)));
-        for (let i = 0; i < coins; i += 1) this.coin(stall.front.x, 900, i * 70);
-        this.walk([{ x: stall.front.x, y: stall.front.y + 70 }, DELIVERY_SPOT]);
+        const agentId = ev.data.agent_id;
+        this.carrying[agentId].visible = true;
+        const coins = Math.max(1, Math.min(14, Math.round(ev.data.usage.cost_usd * 1000)));
+        const home = STALLS[agentId].home;
+        for (let i = 0; i < coins; i += 1) this.coin(home.x, home.y - 40, i * 70);
+        this.walk(agentId, REVIEW_SPOT);
         break;
       }
       case "graded": {
+        const agentId = ev.data.agent_id;
         const promised = ev.data.promised_quality;
         const tone = promised === null || ev.data.grade >= promised ? PALETTE.good
           : ev.data.grade < promised - 1 ? PALETTE.bad : PALETTE.ok;
-        this.floatText(`${ev.data.grade}/10`, tone, OFFICER.x, 960, 1500, 60);
-        this.walk([COURIER_HOME]);
+        this.floatText(`${ev.data.grade}/10`, tone, REVIEWER_POS.x, REVIEWER_POS.y - 100, 1500, 26);
+        this.carrying[agentId].visible = false;
+        this.walk(agentId, STALLS[agentId].home);
         break;
       }
       case "rep_update": {
         const delta = ev.data.new - ev.data.old;
         if (Math.abs(delta) < 0.0005) break;
+        const sign = STALLS[ev.data.agent_id].sign;
         const label = `${delta > 0 ? "+" : ""}${delta.toFixed(3)} ${ev.data.task_type.toUpperCase()}`;
-        this.floatText(label, delta > 0 ? PALETTE.good : PALETTE.bad, STALLS[ev.data.agent_id].cx, 900, 1600, 30);
+        this.floatText(label, delta > 0 ? PALETTE.good : PALETTE.bad, sign.x, sign.y - 36, 1700, 14);
         break;
       }
+      case "error":
+        if (ev.data.task_id) for (const agentId of AGENT_ORDER) this.carrying[agentId].visible = false;
+        if (ev.data.fatal) this.sendEveryoneHome();
+        break;
       case "final":
         this.floatText(ev.data.status === "ok" ? "JOB DONE!" : `JOB ${ev.data.status.toUpperCase()}`,
-          PALETTE.gold, WORLD.w / 2, WORLD.h / 2 - 120, 2200, 96);
-        this.walk([COURIER_HOME]);
-        break;
-      case "error":
-        if (ev.data.fatal) this.walk([COURIER_HOME]);
+          PALETTE.gold, WORLD.w / 2, WORLD.h / 2, 2200, 48);
+        this.sendEveryoneHome();
         break;
       default:
         break;
     }
   }
 
-  // ---------------------------------------------------------------- courier
-  private walk(points: Point[]): void {
-    this.route.push(...points);
-    // Far behind (fast replay or a burst of events): skip to the latest stop.
-    if (this.route.length > 6) {
-      const last = this.route[this.route.length - 1];
-      this.route.length = 0;
-      this.scene.courier.position.set(last.x, last.y);
+  // ---------------------------------------------------------------- walking
+  private walk(agentId: AgentId, to: Point): void {
+    const queue = this.routes[agentId];
+    const from = queue[queue.length - 1] ?? { x: this.scene.vendors[agentId].x, y: this.scene.vendors[agentId].y };
+    queue.push(...route(from, to));
+    if (queue.length > MAX_QUEUED) {
+      const last = queue[queue.length - 1];
+      queue.length = 0;
+      this.scene.vendors[agentId].position.set(last.x, last.y);
     }
   }
 
-  private stepCourier(deltaMs: number): void {
-    const courier = this.scene.courier;
-    const target = this.route[0];
+  private sendEveryoneHome(): void {
+    for (const agentId of AGENT_ORDER) {
+      this.carrying[agentId].visible = false;
+      this.walk(agentId, STALLS[agentId].home);
+    }
+  }
+
+  private step(sprite: Sprite, queue: Point[], deltaMs: number): void {
+    const target = queue[0];
     if (!target) {
-      courier.rotation = 0;
+      sprite.rotation = 0;
       return;
     }
-    const dx = target.x - courier.x;
-    const dy = target.y - courier.y;
+    const dx = target.x - sprite.x;
+    const dy = target.y - sprite.y;
     const dist = Math.hypot(dx, dy);
-    const step = (COURIER_SPEED * this.speed * deltaMs) / 1000;
+    const step = (WALK_SPEED * this.speed * deltaMs) / 1000;
     if (dist <= step) {
-      courier.position.set(target.x, target.y);
-      this.route.shift();
+      sprite.position.set(target.x, target.y);
+      queue.shift();
       return;
     }
-    courier.x += (dx / dist) * step;
-    courier.y += (dy / dist) * step;
-    // The sprite faces left; mirror it when walking right. Waddle while moving.
-    courier.scale.x = dx > 0 ? -1 : 1;
-    this.walkClock += deltaMs;
-    courier.rotation = Math.sin(this.walkClock / 90) * 0.06;
+    sprite.x += (dx / dist) * step;
+    sprite.y += (dy / dist) * step;
+    if (Math.abs(dx) > 0.5) sprite.scale.x = Math.abs(sprite.scale.x) * (dx > 0 ? 1 : -1);
+    sprite.rotation = Math.sin(this.clock / 85) * 0.07;
   }
 
   // ---------------------------------------------------------------- effects
@@ -148,19 +166,19 @@ export class Director {
 
   private floatText(value: string, fill: string, x: number, y: number, ms: number, size: number): void {
     const t: Text = text(value, size, fill);
-    t.style.stroke = { color: PALETTE.ink, width: Math.max(4, size / 7) };
+    t.style.stroke = { color: PALETTE.ink, width: Math.max(3, size / 6) };
     t.position.set(x, y);
     this.add(t, ms, (p) => {
-      t.y = y - 50 * ease(p);
+      t.y = y - 24 * ease(p);
       t.alpha = p < 0.7 ? 1 : 1 - (p - 0.7) / 0.3;
     });
   }
 
   private burst(x: number, y: number, color: string, radius: number): void {
-    for (let i = 0; i < 10; i += 1) {
-      const angle = (Math.PI * 2 * i) / 10;
-      const spark = new Graphics().rect(-5, -5, 10, 10).fill(color);
-      this.add(spark, 650, (p) => {
+    for (let i = 0; i < 8; i += 1) {
+      const angle = (Math.PI * 2 * i) / 8;
+      const spark = new Graphics().rect(-2, -2, 4, 4).fill(color);
+      this.add(spark, 600, (p) => {
         spark.x = x + Math.cos(angle) * radius * ease(p);
         spark.y = y + Math.sin(angle) * radius * 0.6 * ease(p);
         spark.alpha = 1 - p;
@@ -169,11 +187,11 @@ export class Director {
   }
 
   private coin(x: number, y: number, delayMs: number): void {
-    const coin = new Graphics().circle(0, 0, 12).fill(PALETTE.ink).circle(0, 0, 9).fill(PALETTE.gold);
-    const to = { x: SPENT_POS.x - 120, y: SPENT_POS.y };
+    const coin = new Graphics().circle(0, 0, 6).fill(PALETTE.ink).circle(0, 0, 4).fill(PALETTE.gold);
+    const to = { x: SPENT_POS.x - 60, y: SPENT_POS.y };
     this.add(coin, 900, (p) => {
       coin.x = x + (to.x - x) * p;
-      coin.y = y + (to.y - y) * p - 200 * Math.sin(Math.PI * p);
+      coin.y = y + (to.y - y) * p - 90 * Math.sin(Math.PI * p);
     }, delayMs);
   }
 
@@ -183,7 +201,13 @@ export class Director {
   }
 
   private readonly tick = (ticker: Ticker): void => {
-    this.stepCourier(ticker.deltaMS);
+    this.clock += ticker.deltaMS;
+    for (const agentId of AGENT_ORDER) {
+      const v = this.scene.vendors[agentId];
+      this.step(v, this.routes[agentId], ticker.deltaMS);
+      const scroll = this.carrying[agentId];
+      if (scroll.visible) scroll.position.set(v.x + 14, v.y - 30);
+    }
     for (let i = this.tweens.length - 1; i >= 0; i -= 1) {
       const tween = this.tweens[i];
       tween.elapsed += ticker.deltaMS;

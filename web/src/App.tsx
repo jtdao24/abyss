@@ -1,16 +1,16 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { ClientMsg } from "./contract";
 import { Director } from "./scene/director";
 import { MarketScene } from "./scene/Scene";
+import type { InteractId } from "./scene/world";
 import { FixtureSource } from "./sources/fixture";
 import type { EventSource } from "./sources/types";
 import { WsSource } from "./sources/ws";
 import type { MarketState } from "./state/reducer";
 import { store } from "./state/store";
 import { DebugPanel } from "./ui/DebugPanel";
-import { Deliverable } from "./ui/Deliverable";
-import { JobBar } from "./ui/JobBar";
+import { GameDialog } from "./ui/GameDialog";
 
 const params = new URLSearchParams(window.location.search);
 const SOURCE = params.get("source") === "ws" ? "ws" : "fixture";
@@ -38,12 +38,12 @@ function modeBadge(state: MarketState): { label: string; tone: string } {
 export default function App() {
   const [state, setState] = useState(store.getState());
   const [pending, setPending] = useState(false);
-  const [dismissedJob, setDismissedJob] = useState<string | null>(null);
+  const [dialog, setDialog] = useState<InteractId | null>(null);
   const [showLedger, setShowLedger] = useState(params.get("ledger") === "1");
+  const [sceneReady, setSceneReady] = useState(false);
   const sourceRef = useRef<EventSource | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
   const directorRef = useRef<Director | null>(null);
-  const [sceneReady, setSceneReady] = useState(false);
 
   useEffect(() => {
     // StrictMode mounts twice in dev: a cancelled mount destroys its own scene.
@@ -56,6 +56,7 @@ export default function App() {
         return;
       }
       scene = created;
+      scene.onInteract = (id) => setDialog(id);
       directorRef.current = new Director(created, SPEED);
       if (import.meta.env.DEV) (window as unknown as { __abyss: unknown }).__abyss = { scene: created };
       scene.render(store.getState());
@@ -76,7 +77,7 @@ export default function App() {
     const source = createSource();
     sourceRef.current = source;
     source.start((event) => {
-      // A job has actually started (or been rejected): the Run click is resolved.
+      // A job has actually started (or been rejected): the posted job is resolved.
       if (event.type === "job_split" || event.type === "error" || event.type === "final") {
         setPending(false);
       }
@@ -93,22 +94,31 @@ export default function App() {
     if (!state.connected) setPending(false);
   }, [state.connected]);
 
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setDialog(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   const send = (message: ClientMsg) => {
     const sent = sourceRef.current?.send?.(message);
     if (sent === false) console.warn("Not connected; message dropped", message);
     return sent !== false;
   };
+  const collect = useCallback(() => store.collectResult(), []);
 
   const badge = modeBadge(state);
-  const busy = pending || state.jobActive;
-  const jobId = state.currentJob?.jobId ?? null;
-  const showDeliverable = state.final !== null && jobId !== dismissedJob;
 
   return (
     <main className={`app-shell ${showLedger ? "" : "ledger-hidden"}`}>
-      <section className="stage-shell" aria-label="Abyss pixel market">
+      <section className="stage-shell" aria-label="Abyss boardwalk market">
         <header className="stage-header">
-          <strong>ABYSS</strong>
+          <div className="title">
+            <strong>ABYSS</strong>
+            <small>Click to walk. Talk to the Main Agent on the boat to give the market a job.</small>
+          </div>
           <div className="header-actions">
             <button type="button" className="ledger-toggle" onClick={() => setShowLedger((v) => !v)}>
               {showLedger ? "Hide ledger" : "Show ledger"}
@@ -116,29 +126,26 @@ export default function App() {
             <span className={`mode-badge ${badge.tone}`}>{badge.label}</span>
           </div>
         </header>
-        {SOURCE === "ws" && (
-          <JobBar
-            connected={state.connected}
-            busy={busy}
-            defaultPriceWeight={state.config?.price_weight ?? 1}
-            onRun={(job, priceWeight) => {
-              if (send({ type: "start_job", job, price_weight: priceWeight })) setPending(true);
-            }}
-            onReset={() => send({ type: "reset" })}
-          />
-        )}
         <div id="stage" ref={stageRef}>
           {!sceneReady && (
             <div className="stage-placeholder">
               <span>ABYSS MARKET</span>
-              <small>PIXEL HARBOR INITIALIZING</small>
+              <small>SETTING UP THE BOARDWALK</small>
             </div>
           )}
-          {showDeliverable && state.final && (
-            <Deliverable
-              final={state.final}
-              agents={state.agents}
-              onClose={() => setDismissedJob(jobId)}
+          {dialog && (
+            <GameDialog
+              key={dialog}
+              id={dialog}
+              state={state}
+              live={SOURCE === "ws"}
+              pending={pending}
+              onClose={() => setDialog(null)}
+              onPostJob={(job, priceWeight) => {
+                if (send({ type: "start_job", job, price_weight: priceWeight })) setPending(true);
+              }}
+              onReset={() => send({ type: "reset" })}
+              onCollect={collect}
             />
           )}
         </div>

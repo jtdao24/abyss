@@ -49,6 +49,10 @@ export interface MarketState {
   connected: boolean;
   config: HelloData["config"] | null;
   jobActive: boolean;
+  /** The player has picked up the finished job's result from the captain. */
+  resultCollected: boolean;
+  /** Every finished job this session, oldest first (the archive chest). */
+  history: { jobId: string; jobText: string; final: FinalData }[];
 }
 
 export const initialState: MarketState = {
@@ -62,7 +66,13 @@ export const initialState: MarketState = {
   connected: false,
   config: null,
   jobActive: false,
+  resultCollected: false,
+  history: [],
 };
+
+export function collectResult(state: MarketState): MarketState {
+  return state.final ? { ...state, resultCollected: true } : state;
+}
 
 export function setConnected(state: MarketState, connected: boolean): MarketState {
   return { ...state, connected };
@@ -100,6 +110,7 @@ export function reduce(state: MarketState, ev: AbyssEvent): MarketState {
         stats: null,
         final: null,
         jobActive: true,
+        resultCollected: false,
       };
     }
     case "task_posted":
@@ -185,6 +196,10 @@ export function reduce(state: MarketState, ev: AbyssEvent): MarketState {
         agents: mapAgentStatus(state.agents, () => "idle"),
         final: ev.data,
         jobActive: false,
+        history: [
+          ...state.history,
+          { jobId: ev.job_id ?? "", jobText: state.currentJob?.jobText ?? "", final: ev.data },
+        ],
       };
     case "error":
       return {
