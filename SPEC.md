@@ -228,3 +228,5 @@ runs/         (gitignored) ledger.jsonl, reputation.json, recordings
 
 ## 10. Change log
 - **v1 (H0):** initial freeze. Additions beyond the original 10 event types: `hello` (roster, reputation and config on connect) and `error`.
+- **v1 clarification (T01 review):** a failed task segment still ends with `stats`, and a review failure makes `final.status = "partial"`. The wire format is unchanged, so this is not a version bump.
+- **v1 clarification (T01 review):** `runs/` paths are relative to the repo root, not the working directory.

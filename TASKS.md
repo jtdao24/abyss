@@ -26,7 +26,7 @@ Each task is one Codex session. Paste the whole task block into Codex together w
 | # | Title | Track | Stage | Depends | Est | Status |
 |---|---|---|---|---|---|---|
 | T00 | SPEC, fixture, tasks | orch | 0 | — | 1h | ✅ done |
-| T01 | Backend skeleton, config, pricing, ledger, contract validator | B | 1 | T00 | 1.5h | ⬜ |
+| T01 | Backend skeleton, config, pricing, ledger, contract validator | B | 1 | T00 | 1.5h | ✅ merged |
 | T02 | LLM gateway (real + fake), ledger-wired | B | 1 | T01 | 2h | ⬜ |
 | T03 | Reputation store + scoring (pure) | B | 1 | T01 | 1h | ⬜ |
 | T04 | Prompts: orchestrator, bid, work, review | B | 1 | T02, T03 | 2h | ⬜ |
@@ -178,7 +178,7 @@ class LLM:
 - [ ] `python -m abyss.llm --smoke` with a real key runs 4 Haiku calls and prints usage. The ledger JSONL has 4 lines, all with `model == "claude-haiku-4-5"`. The total is under $0.01.
 - [ ] `pytest -q` is green with no network (verify: `ANTHROPIC_API_KEY= pytest -q`).
 
-**Verify:** `ANTHROPIC_API_KEY= pytest -q && python -m abyss.llm --smoke && tail -4 runs/ledger.jsonl`
+**Verify:** `ANTHROPIC_API_KEY= pytest -q && python -m abyss.llm --smoke && tail -4 ../runs/ledger.jsonl`
 
 ---
 
