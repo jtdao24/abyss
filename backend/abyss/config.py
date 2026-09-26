@@ -1,0 +1,68 @@
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+from pathlib import Path
+
+
+@dataclass(frozen=True)
+class AgentSpec:
+    agent_id: str
+    display_name: str
+    model: str
+    color: str
+
+
+AGENTS = [
+    AgentSpec("haiku", "Haiku 4.5", "claude-haiku-4-5", "#4fb3a9"),
+    AgentSpec("sonnet", "Sonnet 5", "claude-sonnet-5", "#e8a33d"),
+    AgentSpec("opus", "Opus 5", "claude-opus-5", "#8e6cc9"),
+]
+
+PRICES: dict[str, tuple[float, float]] = {
+    "claude-haiku-4-5": (1.0, 5.0),
+    "claude-sonnet-5": (2.0, 10.0),
+    "claude-opus-5": (5.0, 25.0),
+}
+SUPPORTS_EFFORT: set[str] = {"claude-sonnet-5", "claude-opus-5"}
+TASK_TYPES: list[str] = ["research", "writing", "checking"]
+
+PRICE_WEIGHT = float(os.getenv("ABYSS_PRICE_WEIGHT", "1.0"))
+REP_INIT = 1.0
+REP_ALPHA = 0.3
+REP_MIN = 0.0
+REP_MAX = 2.0
+MAX_TASKS = 5
+WORK_EFFORT = "medium"
+BID_EFFORT = "low"
+REVIEW_EFFORT = "low"
+SPLIT_EFFORT = "low"
+
+ORCHESTRATOR_MODEL = "claude-sonnet-5"
+REVIEWER_MODEL = "claude-sonnet-5"
+
+
+def real_models() -> bool:
+    return os.getenv("ABYSS_REAL_MODELS") == "1"
+
+
+def fake_llm() -> bool:
+    return os.getenv("ABYSS_FAKE_LLM") == "1"
+
+
+def fake_delay() -> float:
+    return float(os.getenv("ABYSS_FAKE_DELAY", "0.3"))
+
+
+def ledger_path() -> Path:
+    return Path(os.getenv("ABYSS_LEDGER_PATH", "runs/ledger.jsonl"))
+
+
+def rep_path() -> Path:
+    return Path(os.getenv("ABYSS_REP_PATH", "runs/reputation.json"))
+
+
+def resolve_model(nominal: str) -> str:
+    if real_models():
+        return nominal
+    return "claude-haiku-4-5"
