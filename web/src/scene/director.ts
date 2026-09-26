@@ -85,9 +85,8 @@ export class Director {
       case "rep_update": {
         const delta = ev.data.new - ev.data.old;
         if (Math.abs(delta) < 0.0005) break;
-        const [x0, , x1] = STALLS[ev.data.agent_id].label;
         const label = `${delta > 0 ? "+" : ""}${delta.toFixed(3)} ${ev.data.task_type.toUpperCase()}`;
-        this.floatText(label, delta > 0 ? PALETTE.good : PALETTE.bad, (x0 + x1) / 2, 900, 1600, 30);
+        this.floatText(label, delta > 0 ? PALETTE.good : PALETTE.bad, STALLS[ev.data.agent_id].cx, 900, 1600, 30);
         break;
       }
       case "final":

@@ -25,13 +25,16 @@ export const PALETTE = {
   checking: "#d0508a",
 } as const;
 
-/** Where each agent's stall is in the art. Label boxes are the painted "Vendor" signs we cover. */
-export const STALLS: Record<AgentId, { label: [number, number, number, number]; front: { x: number; y: number } }> = {
-  opus: { label: [479, 932, 824, 979], front: { x: 651, y: 1040 } },
-  sonnet: { label: [986, 932, 1338, 979], front: { x: 1162, y: 1040 } },
-  haiku: { label: [1666, 932, 1964, 979], front: { x: 1815, y: 1040 } },
+/** Where each agent's stall is in the art: plate centre (cx) over the painted
+ *  "Vendor" sign row (y0..y1), and the spot in front where bids appear. */
+export const STALLS: Record<AgentId, { cx: number; label: [number, number, number, number]; front: { x: number; y: number } }> = {
+  opus: { cx: 651, label: [486, 932, 816, 979], front: { x: 651, y: 1040 } },
+  sonnet: { cx: 1200, label: [1035, 932, 1365, 979], front: { x: 1200, y: 1040 } },
+  haiku: { cx: 1810, label: [1645, 932, 1975, 979], front: { x: 1810, y: 1040 } },
 };
-const CLOSED_LABEL: [number, number, number, number] = [2102, 932, 2410, 979];
+const PLATE_W = 330;
+const CLOSED_CX = 2272;
+const DELIVERY_LABEL = { x: 1905, y: 1352 };
 export const BOARD = { x: 1400, y: 440, w: 305, h: 160 };
 export const HUB_SPOT = { x: 1552, y: 690 };
 export const DELIVERY_SPOT = { x: 1800, y: 1238 };
@@ -228,39 +231,40 @@ export class MarketScene {
   }
 
   private buildStall(agentId: AgentId): void {
-    const [x0, , x1] = STALLS[agentId].label;
-    const cx = (x0 + x1) / 2;
+    const { cx } = STALLS[agentId];
     const view: StallView = {
       plate: new Graphics(),
-      name: text("", 30),
+      name: text("", 26),
       role: text("", 15, PALETTE.muted),
       reps: new Graphics(),
       bubbleBg: new Graphics(),
       bubbleText: text("", 28, PALETTE.ink),
     };
     view.name.anchor.set(0, 0.5);
-    view.name.position.set(cx - 190, 948);
+    view.name.position.set(cx - PLATE_W / 2 + 14, 948);
     view.role.anchor.set(0, 0.5);
-    view.role.position.set(cx - 190, 976);
+    view.role.position.set(cx - PLATE_W / 2 + 14, 976);
     view.bubbleText.position.set(cx, STALLS[agentId].front.y);
     this.world.addChild(view.plate, view.name, view.role, view.reps, view.bubbleBg, view.bubbleText);
     for (const [i, type] of TASK_TYPES.entries()) {
       const letter = text(type[0].toUpperCase(), 14, PALETTE.cream);
-      letter.position.set(cx + 58, 942 + i * 16);
+      letter.position.set(cx + 46, 942 + i * 16);
       this.world.addChild(letter);
     }
     this.stalls.set(agentId, view);
   }
 
   private buildClosedStall(): void {
-    const [x0, y0, x1, y1] = CLOSED_LABEL;
-    const cx = (x0 + x1) / 2;
+    const cx = CLOSED_CX;
     const plate = new Graphics();
-    plate.roundRect(cx - 205, y0 - 13, 410, y1 - y0 + 26, 10).fill(PALETTE.muted);
-    plate.roundRect(cx - 200, y0 - 8, 400, y1 - y0 + 16, 7).fill({ color: PALETTE.ink, alpha: 0.94 });
+    plate.roundRect(cx - PLATE_W / 2 - 5, 919, PLATE_W + 10, 73, 10).fill(PALETTE.muted);
+    plate.roundRect(cx - PLATE_W / 2, 924, PLATE_W, 63, 7).fill({ color: PALETTE.ink, alpha: 0.94 });
     const label = text("CLOSED", 30, PALETTE.muted);
-    label.position.set((x0 + x1) / 2, (y0 + y1) / 2);
-    this.world.addChild(plate, label);
+    label.position.set(cx, 955);
+    const delivery = text("TASK DELIVERY", 30, PALETTE.paper);
+    delivery.style.stroke = { color: PALETTE.ink, width: 6 };
+    delivery.position.set(DELIVERY_LABEL.x, DELIVERY_LABEL.y);
+    this.world.addChild(plate, label, delivery);
   }
 
   // ------------------------------------------------------------ state → picture
@@ -336,10 +340,10 @@ export class MarketScene {
   }
 
   private drawStall(agentId: AgentId, view: StallView, stall: StallModel | null): void {
-    const [x0, y0, x1, y1] = STALLS[agentId].label;
-    const cx = (x0 + x1) / 2;
+    const [, y0, , y1] = STALLS[agentId].label;
+    const { cx } = STALLS[agentId];
     const color = stall?.color ?? PALETTE.muted;
-    const plateW = 400;
+    const plateW = PLATE_W;
     const px = cx - plateW / 2;
 
     view.plate.clear();
@@ -352,10 +356,10 @@ export class MarketScene {
     TASK_TYPES.forEach((type, i) => {
       const by = 937 + i * 16;
       const rep = stall?.reputation[type] ?? 1;
-      const w = Math.max(0, Math.min(120, Math.round((rep / 2) * 120)));
-      view.reps.rect(cx + 68, by, 120, 10).fill("#3a3a52");
-      view.reps.rect(cx + 68, by, w, 10).fill(TYPE_COLOR[type]);
-      view.reps.rect(cx + 127, by - 3, 3, 16).fill(PALETTE.cream); // 1.0 tick
+      const w = Math.max(0, Math.min(100, Math.round((rep / 2) * 100)));
+      view.reps.rect(cx + 56, by, 100, 10).fill("#3a3a52");
+      view.reps.rect(cx + 56, by, w, 10).fill(TYPE_COLOR[type]);
+      view.reps.rect(cx + 105, by - 3, 3, 16).fill(PALETTE.cream); // 1.0 tick
     });
 
     view.bubbleBg.clear();
