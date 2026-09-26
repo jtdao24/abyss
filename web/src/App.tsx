@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import type { ClientMsg } from "./contract";
+import { MarketScene } from "./scene/Scene";
 import { FixtureSource } from "./sources/fixture";
 import type { EventSource } from "./sources/types";
 import { WsSource } from "./sources/ws";
@@ -38,6 +39,30 @@ export default function App() {
   const [pending, setPending] = useState(false);
   const [dismissedJob, setDismissedJob] = useState<string | null>(null);
   const sourceRef = useRef<EventSource | null>(null);
+  const stageRef = useRef<HTMLDivElement | null>(null);
+  const [sceneReady, setSceneReady] = useState(false);
+
+  useEffect(() => {
+    // StrictMode mounts twice in dev: a cancelled mount destroys its own scene.
+    let cancelled = false;
+    let scene: MarketScene | null = null;
+    let unsubscribe = () => {};
+    void MarketScene.create(stageRef.current!).then((created) => {
+      if (cancelled) {
+        created.destroy();
+        return;
+      }
+      scene = created;
+      scene.render(store.getState());
+      unsubscribe = store.subscribe(() => scene?.render(store.getState()));
+      setSceneReady(true);
+    });
+    return () => {
+      cancelled = true;
+      unsubscribe();
+      scene?.destroy();
+    };
+  }, []);
 
   useEffect(() => {
     const unsubscribe = store.subscribe(() => setState(store.getState()));
@@ -89,11 +114,13 @@ export default function App() {
             onReset={() => send({ type: "reset" })}
           />
         )}
-        <div id="stage">
-          <div className="stage-placeholder">
-            <span>ABYSS MARKET</span>
-            <small>PIXEL HARBOR INITIALIZING</small>
-          </div>
+        <div id="stage" ref={stageRef}>
+          {!sceneReady && (
+            <div className="stage-placeholder">
+              <span>ABYSS MARKET</span>
+              <small>PIXEL HARBOR INITIALIZING</small>
+            </div>
+          )}
           {showDeliverable && state.final && (
             <Deliverable
               final={state.final}
