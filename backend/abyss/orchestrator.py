@@ -22,16 +22,20 @@ async def split_job(
 ) -> tuple[list[TaskSpec], dict]:
     last_error = "split produced fewer than two valid tasks"
     for _ in range(2):
-        result = await llm.call(
-            ledger=ledger,
-            purpose="split",
-            nominal_model=ORCHESTRATOR_MODEL,
-            system=prompts.SPLIT_SYSTEM,
-            user=prompts.SPLIT_USER.format(job_text=job_text),
-            max_tokens=4096,
-            effort=SPLIT_EFFORT,
-            schema=prompts.SPLIT_SCHEMA,
-        )
+        try:
+            result = await llm.call(
+                ledger=ledger,
+                purpose="split",
+                nominal_model=ORCHESTRATOR_MODEL,
+                system=prompts.SPLIT_SYSTEM,
+                user=prompts.SPLIT_USER.format(job_text=job_text),
+                max_tokens=4096,
+                effort=SPLIT_EFFORT,
+                schema=prompts.SPLIT_SCHEMA,
+            )
+        except LLMError as exc:
+            last_error = str(exc)
+            continue
         try:
             tasks = _sanitize_tasks(result.data)
         except (TypeError, ValueError, KeyError) as exc:

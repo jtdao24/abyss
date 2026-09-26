@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
+import logging
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
@@ -12,6 +14,7 @@ from .market import run_job
 from .reputation import ReputationStore
 
 
+logger = logging.getLogger(__name__)
 app = FastAPI()
 reputation = ReputationStore(config.rep_path())
 llm = LLM()
@@ -51,14 +54,10 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                     await _connection_error(stream, error)
                     continue
                 running = asyncio.create_task(
-                    run_job(
+                    _run_job_safely(
+                        stream,
                         message["job"],
-                        stream=stream,
-                        llm=llm,
-                        rep=reputation,
-                        price_weight=message.get(
-                            "price_weight", config.PRICE_WEIGHT
-                        ),
+                        message.get("price_weight", config.PRICE_WEIGHT),
                     )
                 )
             elif message_type == "reset":
@@ -76,6 +75,18 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                 await running
             except asyncio.CancelledError:
                 pass
+
+
+async def _run_job_safely(stream: EventStream, job: str, price_weight: float) -> None:
+    # A crashed job must tell the client instead of leaving it waiting forever.
+    try:
+        await run_job(job, stream=stream, llm=llm, rep=reputation, price_weight=price_weight)
+    except Exception as exc:
+        logger.exception("job crashed")
+        with contextlib.suppress(Exception):
+            await stream.emit(
+                "error", {"message": f"internal error: {exc}", "task_id": None, "fatal": True}, job_id=None
+            )
 
 
 def _validate_start(message: dict) -> str | None:
