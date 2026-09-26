@@ -7,6 +7,14 @@ export const AGENT_ORDER: AgentId[] = ["haiku", "sonnet", "opus"];
 export const TASK_TYPES: TaskType[] = ["research", "writing", "checking"];
 export const MAX_CARDS = 5;
 
+/** Public stall names. The market never shows which model runs a stall;
+ *  the real model names only appear in the (hidden) ledger panel. */
+export const VENDOR: Record<AgentId, { name: string; tier: string }> = {
+  opus: { name: "VENDOR 1", tier: "PREMIUM" },
+  sonnet: { name: "VENDOR 2", tier: "PREMIUM" },
+  haiku: { name: "VENDOR 3", tier: "BUDGET" },
+};
+
 export type BubbleTone = "thinking" | "bid" | "pass" | "won" | "working" | "done";
 export type ReviewTone = "good" | "ok" | "bad";
 
@@ -93,7 +101,7 @@ export function sceneModel(state: MarketState): SceneModel {
       task !== null && task.winner === agentId && task.status !== "open" && task.status !== "failed";
     stalls.push({
       agentId,
-      name: agent.display_name.toUpperCase(),
+      name: VENDOR[agentId].name,
       color: agent.color,
       status: agent.status,
       bubble: bubbleFor(agentId, task),

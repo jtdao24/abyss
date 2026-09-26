@@ -6,7 +6,7 @@ import { Application, Assets, Container, Graphics, Sprite, Text, type Texture } 
 
 import type { AgentId, TaskType } from "../contract";
 import type { MarketState } from "../state/reducer";
-import { AGENT_ORDER, MAX_CARDS, TASK_TYPES, sceneModel, type BubbleTone, type SceneModel, type StallModel } from "./model";
+import { AGENT_ORDER, MAX_CARDS, TASK_TYPES, VENDOR, sceneModel, type BubbleTone, type SceneModel, type StallModel } from "./model";
 
 export const WORLD = { w: 2816, h: 1536 };
 const FONT = ["Silkscreen", "monospace"];
@@ -346,7 +346,7 @@ export class MarketScene {
     view.plate.roundRect(px - 5, y0 - 13, plateW + 10, y1 - y0 + 26, 10).fill(stall?.winner ? PALETTE.gold : color);
     view.plate.roundRect(px, y0 - 8, plateW, y1 - y0 + 16, 7).fill({ color: PALETTE.ink, alpha: 0.94 });
     view.name.text = stall?.name ?? "";
-    view.role.text = agentId === "haiku" ? "CHEAP VENDOR" : "PREMIUM VENDOR";
+    view.role.text = VENDOR[agentId].tier;
 
     view.reps.clear();
     TASK_TYPES.forEach((type, i) => {

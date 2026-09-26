@@ -1,4 +1,5 @@
 import type { AgentSpec, FinalData } from "../contract";
+import { VENDOR } from "../scene/model";
 
 interface DeliverableProps {
   final: FinalData;
@@ -24,7 +25,7 @@ export function Deliverable({ final, agents, onClose }: DeliverableProps) {
               <tr key={task.task_id}>
                 <td>{task.task_id} · {task.type}</td>
                 <td style={{ color: task.agent_id ? agents[task.agent_id]?.color : undefined }}>
-                  {task.agent_id ? agents[task.agent_id]?.display_name ?? task.agent_id : "—"}
+                  {task.agent_id ? VENDOR[task.agent_id].name : "—"}
                 </td>
                 <td>{task.grade ?? "—"} / {task.promised_quality ?? "—"}</td>
                 <td>${task.cost_usd.toFixed(5)}</td>
