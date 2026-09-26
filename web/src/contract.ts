@@ -158,6 +158,11 @@ export interface ErrorData {
   fatal: boolean;
 }
 
+export interface SteeredData {
+  target: "job" | AgentId;
+  note: string;
+}
+
 type Envelope<T extends string, D> = {
   v: 1;
   seq: number;
@@ -179,8 +184,10 @@ export type AbyssEvent =
   | Envelope<"rep_update", RepUpdateData>
   | Envelope<"stats", StatsData>
   | Envelope<"final", FinalData>
-  | Envelope<"error", ErrorData>;
+  | Envelope<"error", ErrorData>
+  | Envelope<"steered", SteeredData>;
 
 export type ClientMsg =
   | { type: "start_job"; job: string; price_weight?: number }
-  | { type: "reset" };
+  | { type: "reset" }
+  | { type: "steer"; target: "job" | AgentId; note: string };

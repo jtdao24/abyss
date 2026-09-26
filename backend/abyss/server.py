@@ -10,7 +10,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from . import config
 from .events import EventStream
 from .llm import LLM
-from .market import run_job
+from .market import Guidance, run_job
 from .reputation import ReputationStore
 
 
@@ -30,6 +30,7 @@ async def websocket_endpoint(ws: WebSocket) -> None:
     await ws.accept()
     stream = EventStream(ws.send_json)
     running: asyncio.Task | None = None
+    guidance: Guidance | None = None
     await stream.hello(reputation)
 
     try:
@@ -53,13 +54,25 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                 if error is not None:
                     await _connection_error(stream, error)
                     continue
+                guidance = Guidance()
                 running = asyncio.create_task(
                     _run_job_safely(
                         stream,
                         message["job"],
                         message.get("price_weight", config.PRICE_WEIGHT),
+                        guidance,
                     )
                 )
+            elif message_type == "steer":
+                error = _validate_steer(message)
+                if error is None and (running is None or running.done() or guidance is None):
+                    error = "no job is running to steer"
+                if error is not None:
+                    await _connection_error(stream, error)
+                    continue
+                note = message["note"].strip()
+                guidance.add(message["target"], note)
+                await stream.emit("steered", {"target": message["target"], "note": note})
             elif message_type == "reset":
                 if running is not None and not running.done():
                     await _connection_error(stream, "cannot reset while a job is running")
@@ -77,16 +90,28 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                 pass
 
 
-async def _run_job_safely(stream: EventStream, job: str, price_weight: float) -> None:
+async def _run_job_safely(stream: EventStream, job: str, price_weight: float, guidance: Guidance) -> None:
     # A crashed job must tell the client instead of leaving it waiting forever.
     try:
-        await run_job(job, stream=stream, llm=llm, rep=reputation, price_weight=price_weight)
+        await run_job(job, stream=stream, llm=llm, rep=reputation, price_weight=price_weight, guidance=guidance)
     except Exception as exc:
         logger.exception("job crashed")
         with contextlib.suppress(Exception):
             await stream.emit(
                 "error", {"message": f"internal error: {exc}", "task_id": None, "fatal": True}, job_id=None
             )
+
+
+STEER_TARGETS = {"job", *(agent.agent_id for agent in config.AGENTS)}
+
+
+def _validate_steer(message: dict) -> str | None:
+    if message.get("target") not in STEER_TARGETS:
+        return "steer target must be 'job' or an agent id"
+    note = message.get("note")
+    if not isinstance(note, str) or not note.strip() or len(note) > 500:
+        return "steer note must be a string between 1 and 500 characters"
+    return None
 
 
 def _validate_start(message: dict) -> str | None:

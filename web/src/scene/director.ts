@@ -7,9 +7,10 @@
 // MarketScene.render(state) shows.
 import { Container, Graphics, type Sprite, type Text, type Ticker } from "pixi.js";
 
-import type { AbyssEvent, AgentId } from "../contract";
+import type { AbyssEvent, AgentId, TaskType } from "../contract";
 import { AGENT_ORDER } from "./model";
 import { PALETTE, SPENT_POS, text, type MarketScene } from "./Scene";
+import { TaskProp } from "./taskfx";
 import { MAIN_AGENT_POS, REVIEWER_POS, REVIEW_SPOT, STALLS, WORLD, route, type Point } from "./world";
 
 const MAX_ACTIVE = 60;    // backlog guard: beyond this, finish every effect instantly
@@ -29,6 +30,9 @@ export class Director {
   private readonly tweens: Tween[] = [];
   private readonly routes = {} as Record<AgentId, Point[]>;
   private readonly carrying = {} as Record<AgentId, Graphics>;
+  /** What each task is, so a vendor's work animation matches its task type. */
+  private readonly taskTypes = new Map<string, TaskType>();
+  private readonly props = new Map<AgentId, TaskProp>();
   private clock = 0;
 
   constructor(
@@ -50,6 +54,7 @@ export class Director {
   destroy(): void {
     this.scene.app.ticker.remove(this.tick);
     this.finishAll();
+    for (const agentId of AGENT_ORDER) this.stopProp(agentId);
   }
 
   onEvent(ev: AbyssEvent): void {
@@ -58,6 +63,7 @@ export class Director {
         this.floatText("NEW JOB!", PALETTE.gold, MAIN_AGENT_POS.x, MAIN_AGENT_POS.y - 90, 1300, 20);
         break;
       case "task_posted":
+        this.taskTypes.set(ev.data.task_id, ev.data.type);
         for (const agentId of AGENT_ORDER) this.walk(agentId, STALLS[agentId].gather);
         break;
       case "bid":
@@ -74,8 +80,14 @@ export class Director {
         for (const agentId of AGENT_ORDER) this.walk(agentId, STALLS[agentId].home);
         break;
       }
+      case "working": {
+        const type = this.taskTypes.get(ev.data.task_id);
+        if (type) this.startProp(ev.data.agent_id, type);
+        break;
+      }
       case "done": {
         const agentId = ev.data.agent_id;
+        this.stopProp(agentId);
         this.carrying[agentId].visible = true;
         const coins = Math.max(1, Math.min(14, Math.round(ev.data.usage.cost_usd * 1000)));
         const home = STALLS[agentId].home;
@@ -102,7 +114,12 @@ export class Director {
         break;
       }
       case "error":
-        if (ev.data.task_id) for (const agentId of AGENT_ORDER) this.carrying[agentId].visible = false;
+        if (ev.data.task_id) {
+          for (const agentId of AGENT_ORDER) {
+            this.carrying[agentId].visible = false;
+            this.stopProp(agentId);
+          }
+        }
         if (ev.data.fatal) this.sendEveryoneHome();
         break;
       case "final":
@@ -127,8 +144,24 @@ export class Director {
     }
   }
 
+  private startProp(agentId: AgentId, type: TaskType): void {
+    this.stopProp(agentId);
+    const prop = new TaskProp(type);
+    const { cx } = STALLS[agentId];
+    prop.position.set(cx + 80, 388);
+    prop.scale.set(1.4);
+    this.scene.fx.addChild(prop);
+    this.props.set(agentId, prop);
+  }
+
+  private stopProp(agentId: AgentId): void {
+    this.props.get(agentId)?.destroy({ children: true });
+    this.props.delete(agentId);
+  }
+
   private sendEveryoneHome(): void {
     for (const agentId of AGENT_ORDER) {
+      this.stopProp(agentId);
       this.carrying[agentId].visible = false;
       this.walk(agentId, STALLS[agentId].home);
     }
@@ -206,7 +239,14 @@ export class Director {
       const v = this.scene.vendors[agentId];
       this.step(v, this.routes[agentId], ticker.deltaMS);
       const scroll = this.carrying[agentId];
-      if (scroll.visible) scroll.position.set(v.x + 14, v.y - 30);
+      if (scroll.visible) scroll.position.set(v.x + 20, v.y - 40);
+    }
+    for (const [agentId, prop] of this.props) {
+      // a vendor still walking back carries the work; at the stall it sits on the counter
+      const v = this.scene.vendors[agentId];
+      if (this.routes[agentId].length > 0) prop.position.set(v.x + 34, v.y - 70);
+      else prop.position.set(STALLS[agentId].cx + 80, 388);
+      prop.update(ticker.deltaMS);
     }
     for (let i = this.tweens.length - 1; i >= 0; i -= 1) {
       const tween = this.tweens[i];

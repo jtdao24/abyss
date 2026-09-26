@@ -39,6 +39,16 @@ Task brief:
 Dependency outputs:
 {dependencies}"""
 
+WORK_GUIDANCE = """
+
+Guidance from the client while the job was running (follow it):
+{notes}"""
+
+REVIEW_GUIDANCE = """
+
+Guidance the client gave while the job was running (the work had to follow it):
+{notes}"""
+
 DEPENDENCY_ITEM = """[{task_id}]
 {output}"""
 NO_DEPENDENCIES = "(none)"

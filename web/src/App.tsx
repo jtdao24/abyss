@@ -41,9 +41,16 @@ export default function App() {
   const [dialog, setDialog] = useState<InteractId | null>(null);
   const [showLedger, setShowLedger] = useState(params.get("ledger") === "1");
   const [sceneReady, setSceneReady] = useState(false);
+
+  // Opening a panel zooms the camera onto who you're talking to; closing zooms out.
+  const openDialog = useCallback((id: InteractId | null) => {
+    setDialog(id);
+    sceneRef.current?.focus(id === "tasks" ? null : id);
+  }, []);
   const sourceRef = useRef<EventSource | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
   const directorRef = useRef<Director | null>(null);
+  const sceneRef = useRef<MarketScene | null>(null);
 
   useEffect(() => {
     // StrictMode mounts twice in dev: a cancelled mount destroys its own scene.
@@ -56,7 +63,9 @@ export default function App() {
         return;
       }
       scene = created;
-      scene.onInteract = (id) => setDialog(id);
+      sceneRef.current = created;
+      scene.onInteract = (id) => openDialog(id);
+      scene.onGround = () => openDialog(null);
       directorRef.current = new Director(created, SPEED);
       if (import.meta.env.DEV) (window as unknown as { __abyss: unknown }).__abyss = { scene: created };
       scene.render(store.getState());
@@ -96,11 +105,11 @@ export default function App() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setDialog(null);
+      if (e.key === "Escape") openDialog(null);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [openDialog]);
 
   const send = (message: ClientMsg) => {
     const sent = sourceRef.current?.send?.(message);
@@ -117,7 +126,7 @@ export default function App() {
         <header className="stage-header">
           <div className="title">
             <strong>ABYSS</strong>
-            <small>Click to walk. Talk to the Main Agent on the boat to give the market a job.</small>
+            <small>Click to walk. Talk to the Main Agent on the boat to give the market a job. Click a vendor to watch and steer it.</small>
           </div>
           <div className="header-actions">
             <button type="button" className="ledger-toggle" onClick={() => setShowLedger((v) => !v)}>
@@ -140,12 +149,13 @@ export default function App() {
               state={state}
               live={SOURCE === "ws"}
               pending={pending}
-              onClose={() => setDialog(null)}
+              onClose={() => openDialog(null)}
               onPostJob={(job, priceWeight) => {
                 if (send({ type: "start_job", job, price_weight: priceWeight })) setPending(true);
               }}
               onReset={() => send({ type: "reset" })}
               onCollect={collect}
+              onSteer={(target, note) => send({ type: "steer", target, note })}
             />
           )}
         </div>

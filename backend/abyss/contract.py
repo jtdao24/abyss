@@ -258,6 +258,11 @@ class ErrorData(ContractModel):
     fatal: StrictBool
 
 
+class SteeredData(ContractModel):
+    target: Literal["job", "haiku", "sonnet", "opus"]
+    note: Annotated[str, Field(min_length=1, max_length=500)]
+
+
 class Envelope(ContractModel):
     v: Literal[1]
     seq: NonNegativeInt
@@ -280,7 +285,10 @@ DATA_MODELS: dict[str, type[ContractModel]] = {
     "stats": StatsData,
     "final": FinalData,
     "error": ErrorData,
+    "steered": SteeredData,
 }
+# Events that may appear anywhere in a job and are not part of the task sequence.
+ASIDE = {"error", "steered"}
 
 
 def validate_event(ev: dict) -> None:
@@ -325,7 +333,7 @@ def _validate_task_segment(segment: list[dict], task: dict, index: int, total: i
     task_id = task["task_id"]
     if not segment or segment[-1]["type"] != "stats":
         raise ValueError(f"task {task_id} segment must end with stats")
-    non_errors = [ev for ev in segment if ev["type"] != "error"]
+    non_errors = [ev for ev in segment if ev["type"] not in ASIDE]
     _check_task_identity(non_errors, task_id)
 
     posted = non_errors[0]
@@ -416,7 +424,7 @@ def _validate_job(job_id: str, events: list[dict]) -> None:
     if events[-1]["type"] != "final":
         raise ValueError(f"final must be the last event for job {job_id}")
 
-    non_errors = [ev for ev in events if ev["type"] != "error"]
+    non_errors = [ev for ev in events if ev["type"] not in ASIDE]
     split_events = [ev for ev in non_errors if ev["type"] == "job_split"]
     if not split_events:
         fatal_errors = [ev for ev in events if ev["type"] == "error" and ev["data"]["fatal"]]

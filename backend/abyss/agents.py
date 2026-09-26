@@ -10,8 +10,12 @@ from .llm import LLM
 from .orchestrator import TaskSpec
 
 
+def guidance_text(notes: list[str]) -> str:
+    return "\n".join(f"- {note}" for note in notes)
+
+
 def build_work_prompt(
-    job_text: str, task: TaskSpec, dep_outputs: dict[str, str]
+    job_text: str, task: TaskSpec, dep_outputs: dict[str, str], notes: list[str] | None = None
 ) -> tuple[str, str]:
     dependencies = _dependency_text(task, dep_outputs)
     system = prompts.WORK_SYSTEM[task.type]
@@ -21,6 +25,8 @@ def build_work_prompt(
         brief=task.brief,
         dependencies=dependencies,
     )
+    if notes:
+        user += prompts.WORK_GUIDANCE.format(notes=guidance_text(notes))
     return system, user
 
 
@@ -68,8 +74,9 @@ async def do_work(
     job_text: str,
     task: TaskSpec,
     dep_outputs: dict[str, str],
+    notes: list[str] | None = None,
 ) -> tuple[str, dict]:
-    system, user = build_work_prompt(job_text, task, dep_outputs)
+    system, user = build_work_prompt(job_text, task, dep_outputs, notes)
     result = await llm.call(
         ledger=ledger,
         purpose="work",

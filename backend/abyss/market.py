@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 
 from . import config
 from .agents import build_work_prompt, do_work, est_input_tokens, request_bid
@@ -13,6 +13,24 @@ from .orchestrator import TaskSpec, split_job
 from .reputation import ReputationStore
 from .reviewer import review
 from .scoring import ScoredBid, clamp_bid, pick_winner, predicted_cost, score_bid
+
+
+@dataclass
+class Guidance:
+    """Steering notes the client sends while a job runs. Work and review prompts
+    read them at call time, so a note applies from the next piece of work on."""
+
+    job: list[str] = field(default_factory=list)
+    by_agent: dict[str, list[str]] = field(default_factory=dict)
+
+    def add(self, target: str, note: str) -> None:
+        if target == "job":
+            self.job.append(note)
+        else:
+            self.by_agent.setdefault(target, []).append(note)
+
+    def for_agent(self, agent_id: str) -> list[str]:
+        return [*self.job, *self.by_agent.get(agent_id, [])]
 
 
 @dataclass
@@ -33,6 +51,7 @@ async def run_job(
     price_weight: float = config.PRICE_WEIGHT,
     fixed_agent_id: str | None = None,
     tasks: list[TaskSpec] | None = None,
+    guidance: Guidance | None = None,
 ) -> JobResult:
     job_id = new_job_id()
     stream.start_job(job_id)
@@ -84,7 +103,7 @@ async def run_job(
             for task_id in task.depends_on
             if task_id in outputs
         }
-        system, user = build_work_prompt(job_text, task, dep_outputs)
+        system, user = build_work_prompt(job_text, task, dep_outputs, guidance.job if guidance else None)
         estimated_input = est_input_tokens(system, user)
         await stream.emit(
             "task_posted",
@@ -142,9 +161,10 @@ async def run_job(
         await stream.emit(
             "working", {"task_id": task.task_id, "agent_id": winner.agent_id}
         )
+        notes = guidance.for_agent(winner.agent_id) if guidance else []
         try:
             output, work_usage = await _work_with_retry(
-                llm, ledger, winner, job_text, task, dep_outputs
+                llm, ledger, winner, job_text, task, dep_outputs, notes
             )
         except LLMError as exc:
             task_failed = True
@@ -172,7 +192,7 @@ async def run_job(
 
         try:
             grade, rationale, review_usage = await _review_with_retry(
-                llm, ledger, job_text, task, dep_outputs, output
+                llm, ledger, job_text, task, dep_outputs, output, notes
             )
         except LLMError as exc:
             task_failed = True
@@ -367,10 +387,11 @@ async def _work_with_retry(
     job_text: str,
     task: TaskSpec,
     dep_outputs: dict[str, str],
+    notes: list[str],
 ) -> tuple[str, dict]:
     for attempt in range(2):
         try:
-            return await do_work(llm, ledger, agent, job_text, task, dep_outputs)
+            return await do_work(llm, ledger, agent, job_text, task, dep_outputs, notes)
         except LLMError:
             if attempt == 1:
                 raise
@@ -384,10 +405,11 @@ async def _review_with_retry(
     task: TaskSpec,
     dep_outputs: dict[str, str],
     output: str,
+    notes: list[str],
 ) -> tuple[int, str, dict]:
     for attempt in range(2):
         try:
-            return await review(llm, ledger, job_text, task, dep_outputs, output)
+            return await review(llm, ledger, job_text, task, dep_outputs, output, notes)
         except LLMError:
             if attempt == 1:
                 raise

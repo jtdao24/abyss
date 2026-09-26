@@ -51,8 +51,10 @@ export interface MarketState {
   jobActive: boolean;
   /** The player has picked up the finished job's result from the captain. */
   resultCollected: boolean;
-  /** Every finished job this session, oldest first (the archive chest). */
+  /** Every finished job this session, oldest first. */
   history: { jobId: string; jobText: string; final: FinalData }[];
+  /** Steering notes the server acknowledged, for every job this session. */
+  steering: { jobId: string; target: "job" | AgentId; note: string }[];
 }
 
 export const initialState: MarketState = {
@@ -68,6 +70,7 @@ export const initialState: MarketState = {
   jobActive: false,
   resultCollected: false,
   history: [],
+  steering: [],
 };
 
 export function collectResult(state: MarketState): MarketState {
@@ -209,6 +212,11 @@ export function reduce(state: MarketState, ev: AbyssEvent): MarketState {
         tasks: ev.data.task_id
           ? updateTask(state.tasks, ev.data.task_id, { status: "failed" })
           : state.tasks,
+      };
+    case "steered":
+      return {
+        ...withLog,
+        steering: [...state.steering, { jobId: ev.job_id ?? "", ...ev.data }],
       };
     default:
       console.warn("Unknown Abyss event type", (ev as { type: string }).type);

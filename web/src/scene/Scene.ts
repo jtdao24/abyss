@@ -16,6 +16,7 @@ import {
 } from "pixi.js";
 
 import type { AgentId, TaskType } from "../contract";
+import { Ambient, type AmbientData } from "./ambient";
 import type { MarketState } from "../state/reducer";
 import { AGENT_ORDER, MAX_CARDS, VENDOR, sceneModel, type BubbleTone, type SceneModel } from "./model";
 import {
@@ -24,6 +25,7 @@ import {
   REVIEWER_POS,
   STALLS,
   WORLD,
+  focusRect,
   hitTest,
   route,
   standable,
@@ -34,9 +36,13 @@ import {
 } from "./world";
 
 const FONT = ["Silkscreen", "monospace"];
-const PEOPLE_SCALE = 0.46;
-const PLAYER_SPEED = 260; // world px per second
-const HEAD = 62;          // bubble height above a person's feet
+const PEOPLE_SCALE = 0.62;
+const PLAYER_SPEED = 280; // world px per second
+const HEAD = 84;          // bubble height above a person's feet
+const MAX_ZOOM = 3;       // focus never zooms past this multiple of the fitted view
+const PANEL_SHARE = 0.4;  // right-hand share of the stage covered by the focus panel
+/** ?calm=1 turns off the rippling water and swaying leaves (for slow machines). */
+const CALM = new URLSearchParams(window.location.search).get("calm") === "1";
 
 export const PALETTE = {
   ink: "#1b1b2f",
@@ -128,6 +134,8 @@ export class MarketScene {
   player!: Sprite;
   /** Called when the player reaches something they clicked. */
   onInteract: (id: InteractId) => void = () => {};
+  /** Called when the player clicks open ground (not a person or stall). */
+  onGround: () => void = () => {};
 
   private readonly el: HTMLElement;
   private readonly vendorBubbles = {} as Record<AgentId, Bubble>;
@@ -150,6 +158,12 @@ export class MarketScene {
   private clock = 0;
   private lastModel = "";
   private resizeObserver: ResizeObserver | null = null;
+  private ambient!: Ambient;
+  /** Camera: the fitted view, where it is heading, and where it is now. */
+  private base = { scale: 1, x: 0, y: 0 };
+  private camTarget = { scale: 1, x: 0, y: 0 };
+  private cam = { scale: 1, x: 0, y: 0 };
+  private focused: InteractId | null = null;
 
   private constructor(el: HTMLElement, app: Application) {
     this.el = el;
@@ -166,11 +180,20 @@ export class MarketScene {
       resolution: Math.min(2, window.devicePixelRatio || 1),
       autoDensity: true,
     });
-    const backdrop = await Assets.load<Texture>("/art/boardwalk.png");
+    const [backdrop, water, foliage, ambient] = await Promise.all([
+      Assets.load<Texture>("/art/boardwalk.png"),
+      Assets.load<Texture>("/art/boardwalk_water.png"),
+      Assets.load<Texture>("/art/boardwalk_foliage.png"),
+      fetch("/art/boardwalk_ambient.json").then((r) => r.json() as Promise<AmbientData>),
+    ]);
     const people = Object.fromEntries(
       await Promise.all(SPRITES.map(async (name) => [name, await Assets.load<Texture>(`/art/characters/${name}.png`)])),
     ) as Record<(typeof SPRITES)[number], Texture>;
+    // Keep motion in real time on slow machines: let a frame cover up to 250ms
+    // (Pixi's default caps it at 100ms, which makes everyone crawl below 10fps).
+    app.ticker.minFPS = 4;
     const scene = new MarketScene(el, app);
+    scene.ambient = new Ambient(backdrop, water, foliage, ambient, WORLD.w, !CALM);
     scene.build(backdrop, people);
     el.appendChild(app.canvas);
     app.canvas.classList.add("market-canvas");
@@ -201,13 +224,44 @@ export class MarketScene {
     this.onArrive = then;
   }
 
+  /** Zoom the camera onto a person or stall (null zooms back out). */
+  focus(id: InteractId | null): void {
+    this.focused = id;
+    this.camTarget = this.cameraFor(id);
+  }
+
   private fit(): void {
     const { clientWidth: w, clientHeight: h } = this.el;
     if (!w || !h) return;
     this.app.renderer.resize(w, h);
     const scale = Math.min(w / WORLD.w, h / WORLD.h);
-    this.world.scale.set(scale);
-    this.world.position.set(Math.round((w - WORLD.w * scale) / 2), Math.round((h - WORLD.h * scale) / 2));
+    this.base = { scale, x: Math.round((w - WORLD.w * scale) / 2), y: Math.round((h - WORLD.h * scale) / 2) };
+    this.camTarget = this.cameraFor(this.focused);
+    if (this.focused === null) this.cam = { ...this.base };
+  }
+
+  private cameraFor(id: InteractId | null): { scale: number; x: number; y: number } {
+    const rect = id ? focusRect(id) : null;
+    if (!rect) return { ...this.base };
+    const { clientWidth: w, clientHeight: h } = this.el;
+    const [x0, y0, x1, y1] = rect;
+    const viewW = w * (1 - PANEL_SHARE);
+    const scale = Math.min(this.base.scale * MAX_ZOOM, (viewW * 0.9) / (x1 - x0), (h * 0.9) / (y1 - y0));
+    let x = viewW / 2 - ((x0 + x1) / 2) * scale;
+    let y = h / 2 - ((y0 + y1) / 2) * scale;
+    // keep the art filling the view where it can
+    if (WORLD.w * scale > w) x = Math.min(0, Math.max(w - WORLD.w * scale, x));
+    if (WORLD.h * scale > h) y = Math.min(0, Math.max(h - WORLD.h * scale, y));
+    return { scale, x, y };
+  }
+
+  private stepCamera(deltaMs: number): void {
+    const k = 1 - Math.exp(-deltaMs / 140);
+    this.cam.scale += (this.camTarget.scale - this.cam.scale) * k;
+    this.cam.x += (this.camTarget.x - this.cam.x) * k;
+    this.cam.y += (this.camTarget.y - this.cam.y) * k;
+    this.world.scale.set(this.cam.scale);
+    this.world.position.set(this.cam.x, this.cam.y);
   }
 
   // ------------------------------------------------------------ build once
@@ -222,7 +276,7 @@ export class MarketScene {
 
   private build(backdrop: Texture, people: Record<(typeof SPRITES)[number], Texture>): void {
     this.app.stage.addChild(this.world);
-    this.world.addChild(new Sprite(backdrop), this.clickRing, this.hover);
+    this.world.addChild(new Sprite(backdrop), this.ambient.back, this.clickRing, this.hover);
 
     for (const agentId of AGENT_ORDER) this.buildSign(agentId);
 
@@ -233,7 +287,7 @@ export class MarketScene {
       this.vendors[agentId] = this.person(people[VENDOR_SPRITE[agentId]], STALLS[agentId].home);
     }
     this.player = this.person(people.player, PLAYER_START);
-    this.world.addChild(this.actors);
+    this.world.addChild(this.ambient.front, this.actors);
 
     const bubbles = new Container();
     for (const agentId of AGENT_ORDER) {
@@ -312,6 +366,7 @@ export class MarketScene {
     const thing = hitTest(p);
     const dest = standable(thing ? thing.approach : p);
     this.walkTo(dest, thing ? () => this.onInteract(thing.id) : null);
+    if (!thing) this.onGround();
     this.clickRing.position.set(dest.x, dest.y);
     this.clickAge = 0;
   }
@@ -333,7 +388,11 @@ export class MarketScene {
   // ------------------------------------------------------------ frame loop
   private readonly tick = (ticker: Ticker): void => {
     this.clock += ticker.deltaMS;
+    this.stepCamera(ticker.deltaMS);
+    this.ambient.update(ticker);
     this.stepPlayer(ticker.deltaMS);
+    // the main agent rides the boat's gentle bob
+    this.mainAgent.y = MAIN_AGENT_POS.y + Math.sin(this.clock / 900) * 1.5;
     // bubbles follow their speakers; people overlap by depth
     for (const agentId of AGENT_ORDER) {
       const v = this.vendors[agentId];

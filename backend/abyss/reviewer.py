@@ -14,21 +14,25 @@ async def review(
     task: TaskSpec,
     dep_outputs: dict[str, str],
     output: str,
+    notes: list[str] | None = None,
 ) -> tuple[int, str, dict]:
     dependencies = _dependency_text(task, dep_outputs)
+    user = prompts.REVIEW_USER.format(
+        job_text=job_text,
+        task_type=task.type,
+        title=task.title,
+        brief=task.brief,
+        dependencies=dependencies,
+        output=output,
+    )
+    if notes:
+        user += prompts.REVIEW_GUIDANCE.format(notes="\n".join(f"- {note}" for note in notes))
     result = await llm.call(
         ledger=ledger,
         purpose="review",
         nominal_model=REVIEWER_MODEL,
         system=prompts.REVIEW_SYSTEM,
-        user=prompts.REVIEW_USER.format(
-            job_text=job_text,
-            task_type=task.type,
-            title=task.title,
-            brief=task.brief,
-            dependencies=dependencies,
-            output=output,
-        ),
+        user=user,
         max_tokens=2048,
         effort=REVIEW_EFFORT,
         schema=prompts.REVIEW_SCHEMA,

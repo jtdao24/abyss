@@ -20,11 +20,12 @@ interface GameDialogProps {
   onPostJob(job: string, priceWeight: number): void;
   onReset(): void;
   onCollect(): void;
+  onSteer(target: "job" | AgentId, note: string): void;
 }
 
-function Shell({ title, subtitle, onClose, children }: { title: string; subtitle?: string; onClose(): void; children: ReactNode }) {
+function Shell({ title, subtitle, onClose, children, side = true }: { title: string; subtitle?: string; onClose(): void; children: ReactNode; side?: boolean }) {
   return (
-    <div className="rpg-dialog" role="dialog" aria-label={title} onPointerDown={(e) => e.stopPropagation()}>
+    <div className={`rpg-dialog ${side ? "side" : ""}`} role="dialog" aria-label={title} onPointerDown={(e) => e.stopPropagation()}>
       <header>
         <div>
           <strong>{title}</strong>
@@ -34,6 +35,48 @@ function Shell({ title, subtitle, onClose, children }: { title: string; subtitle
       </header>
       <div className="rpg-body">{children}</div>
     </div>
+  );
+}
+
+/** Notes steering the current job (the latest job's, while a new one is splitting). */
+function currentNotes(state: MarketState, target: "job" | AgentId) {
+  const jobId = state.currentJob?.jobId ?? state.steering.at(-1)?.jobId;
+  return state.steering.filter((n) => n.jobId === jobId && n.target === target);
+}
+
+function SteerBox({ state, live, target, onSteer, placeholder, hint }: {
+  state: MarketState;
+  live: boolean;
+  target: "job" | AgentId;
+  onSteer: GameDialogProps["onSteer"];
+  placeholder: string;
+  hint: string;
+}) {
+  const [note, setNote] = useState("");
+  const notes = currentNotes(state, target);
+  const canSteer = live && state.connected && state.jobActive;
+  return (
+    <section className="steer-box">
+      <h3>Steer</h3>
+      <p className="rpg-hint">{canSteer ? hint : live ? "You can steer while a job is running." : "Steering needs a live connection (?source=ws)."}</p>
+      {notes.length > 0 && (
+        <ul className="steer-notes">
+          {notes.map((n, i) => <li key={i}>"{n.note}"</li>)}
+        </ul>
+      )}
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          const trimmed = note.trim();
+          if (!trimmed || !canSteer) return;
+          onSteer(target, trimmed);
+          setNote("");
+        }}
+      >
+        <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} maxLength={500} placeholder={placeholder} disabled={!canSteer} aria-label="Steering note" />
+        <button type="submit" disabled={!canSteer || !note.trim()}>Send note</button>
+      </form>
+    </section>
   );
 }
 
@@ -52,7 +95,7 @@ function TaskRow({ task }: { task: TaskView }) {
 }
 
 function MainAgentDialog(props: GameDialogProps) {
-  const { state, live, pending, onClose, onPostJob, onReset, onCollect } = props;
+  const { state, live, pending, onClose, onPostJob, onReset, onCollect, onSteer } = props;
   const [job, setJob] = useState(DEFAULT_JOB);
   const [priceWeight, setPriceWeight] = useState(state.config?.price_weight ?? 1);
   // Talking to the main agent while a result waits hands it over. Remember
@@ -80,6 +123,14 @@ function MainAgentDialog(props: GameDialogProps) {
           {state.taskOrder.map((id) => <TaskRow key={id} task={state.tasks[id]} />)}
         </ul>
         <p className="rpg-hint">The vendors come to my boat for each task. I'll have your result here once every task is graded.</p>
+        <SteerBox
+          state={state}
+          live={live}
+          target="job"
+          onSteer={onSteer}
+          placeholder="e.g. Change of plan: aim it at 10-year-olds."
+          hint="A note here reaches every vendor from their next piece of work on, and the reviewer grades against it."
+        />
       </Shell>
     );
   }
@@ -122,7 +173,7 @@ function MainAgentDialog(props: GameDialogProps) {
 function TasksDialog({ state, onClose }: GameDialogProps) {
   const open = state.taskOrder.map((id) => state.tasks[id]);
   return (
-    <Shell title="Tasks" subtitle={open.length ? `${open.length} tasks for the current job` : "No tasks yet. Give the Main Agent (on the boat) a job."} onClose={onClose}>
+    <Shell side={false} title="Tasks" subtitle={open.length ? `${open.length} tasks for the current job` : "No tasks yet. Give the Main Agent (on the boat) a job."} onClose={onClose}>
       <ul className="board-list">
         {open.map((task) => (
           <li key={task.task_id}>
@@ -147,16 +198,64 @@ function TasksDialog({ state, onClose }: GameDialogProps) {
   );
 }
 
-function VendorDialog({ state, onClose, agentId }: GameDialogProps & { agentId: AgentId }) {
+function vendorActivity(state: MarketState, agentId: AgentId): { line: string; task: TaskView | null } {
+  const tasks = state.taskOrder.map((id) => state.tasks[id]);
+  const working = tasks.find((t) => t.winner === agentId && (t.status === "working" || t.status === "assigned"));
+  if (working) return { line: `Working on ${working.task_id.toUpperCase()} (${working.type})...`, task: working };
+  const open = tasks.find((t) => t.status === "open");
+  if (open) {
+    const bid = open.bids[agentId];
+    return { line: bid ? `Bid on ${open.task_id.toUpperCase()}, waiting for the result` : `At the boat, sizing up ${open.task_id.toUpperCase()}`, task: open };
+  }
+  const reviewed = [...tasks].reverse().find((t) => t.winner === agentId && (t.status === "done" || t.status === "graded"));
+  if (reviewed) return { line: reviewed.status === "done" ? `Handed ${reviewed.task_id.toUpperCase()} to the reviewer` : `Finished ${reviewed.task_id.toUpperCase()}`, task: reviewed };
+  return { line: state.jobActive ? "Waiting for the next task" : "Waiting for a job", task: null };
+}
+
+function VendorDialog({ state, live, onClose, onSteer, agentId }: GameDialogProps & { agentId: AgentId }) {
   const agent = state.agents[agentId];
   const vendor = VENDOR[agentId];
   const stats = state.stats?.by_agent[agentId];
-  const openTask = state.taskOrder.map((id) => state.tasks[id]).find((t) => t.status === "open");
-  const bid = openTask?.bids[agentId];
+  const { line, task } = vendorActivity(state, agentId);
+  const bid = task?.bids[agentId];
+  const mine = state.taskOrder.map((id) => state.tasks[id]).filter((t) => t.winner === agentId);
   return (
-    <Shell title={vendor.name} subtitle={`${vendor.tier} vendor`} onClose={onClose}>
+    <Shell title={`${vendor.name} · ${vendor.tier}`} subtitle={line} onClose={onClose}>
+      {task && (
+        <section className="now-card">
+          <div className="board-head">
+            <span className={`type-chip ${task.type}`}>{task.type}</span>
+            <strong>{task.task_id.toUpperCase()} · {task.title}</strong>
+            <em>{task.status}</em>
+          </div>
+          <p>{task.brief}</p>
+          {bid && <p className="rpg-hint">{bid.ok ? `Bid: promises ${bid.promised_quality}/10 for ${formatCents(bid.predicted_cost_usd ?? 0)} — "${bid.pitch}"` : "Passed on this task."}</p>}
+          {task.winner === agentId && task.status === "working" && <div className="working-bar"><i /></div>}
+          {task.winner === agentId && task.output && (
+            <details open={task.status !== "working"}>
+              <summary>Output</summary>
+              <p className="output-text">{task.output}</p>
+            </details>
+          )}
+          {task.winner === agentId && task.grade !== null && <p className="grade">Graded {task.grade}/10 — {task.rationale}</p>}
+        </section>
+      )}
+      <SteerBox
+        state={state}
+        live={live}
+        target={agentId}
+        onSteer={onSteer}
+        placeholder="e.g. Keep it under 80 words and name one source."
+        hint={`Your note goes into ${vendor.name}'s instructions from its next piece of work on, and the reviewer grades against it.`}
+      />
+      {mine.length > 0 && (
+        <>
+          <h3>This job</h3>
+          <ul className="task-lines">{mine.map((t) => <TaskRow key={t.task_id} task={t} />)}</ul>
+        </>
+      )}
+      <p className="rpg-hint">Spent ${(stats?.cost_usd ?? 0).toFixed(5)} on {stats?.calls ?? 0} calls this job.</p>
       <h3>Reputation</h3>
-      <p className="rpg-hint">1.00 means this vendor delivers exactly what it promises. Below 1 it overpromises.</p>
       <ul className="rep-lines">
         {TYPES.map((type) => {
           const rep = agent?.reputation[type] ?? 1;
@@ -169,16 +268,7 @@ function VendorDialog({ state, onClose, agentId }: GameDialogProps & { agentId: 
           );
         })}
       </ul>
-      <h3>This job</h3>
-      <p>
-        Tasks won: {stats?.tasks_won ?? 0} · Spent ${(stats?.cost_usd ?? 0).toFixed(5)} on {stats?.calls ?? 0} calls
-      </p>
-      {openTask && (
-        <p>
-          Bidding on {openTask.task_id.toUpperCase()}:{" "}
-          {bid ? (bid.ok ? `promises ${bid.promised_quality}/10 for ${formatCents(bid.predicted_cost_usd ?? 0)} — "${bid.pitch}"` : "passed") : "thinking..."}
-        </p>
-      )}
+      <p className="rpg-hint">1.00 = delivers what it promises. Below 1 it overpromises.</p>
     </Shell>
   );
 }

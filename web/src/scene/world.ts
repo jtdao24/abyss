@@ -47,11 +47,22 @@ export interface Interactable {
 
 export const INTERACTABLES: Interactable[] = [
   { id: "main", label: "MAIN AGENT - GIVE A JOB", hit: [445, 670, 575, 775], approach: { x: 312, y: 728 } },
-  { id: "reviewer", label: "REVIEWER", hit: [122, 505, 200, 580], approach: { x: 200, y: 610 } },
-  { id: "vendor:opus", label: "VENDOR 1", hit: [322, 245, 552, 478], approach: { x: 505, y: 465 } },
-  { id: "vendor:sonnet", label: "VENDOR 2", hit: [732, 245, 952, 478], approach: { x: 910, y: 465 } },
-  { id: "vendor:haiku", label: "VENDOR 3", hit: [1138, 245, 1368, 478], approach: { x: 1320, y: 465 } },
+  { id: "reviewer", label: "REVIEWER", hit: [118, 470, 205, 580], approach: { x: 205, y: 615 } },
+  { id: "vendor:opus", label: "VENDOR 1", hit: [322, 245, 552, 478], approach: { x: 360, y: 466 } },
+  { id: "vendor:sonnet", label: "VENDOR 2", hit: [732, 245, 952, 478], approach: { x: 765, y: 466 } },
+  { id: "vendor:haiku", label: "VENDOR 3", hit: [1138, 245, 1368, 478], approach: { x: 1175, y: 466 } },
 ];
+
+/** What the camera frames when the player talks to someone. */
+export function focusRect(id: InteractId): Rect | null {
+  if (id === "main") return [360, 560, 880, 860];
+  if (id === "reviewer") return [60, 460, 400, 720];
+  if (id.startsWith("vendor:")) {
+    const { cx } = STALLS[id.slice("vendor:".length) as AgentId];
+    return [cx - 200, 225, cx + 200, 520];
+  }
+  return null;
+}
 
 export function inside([x0, y0, x1, y1]: Rect, p: Point): boolean {
   return p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1;

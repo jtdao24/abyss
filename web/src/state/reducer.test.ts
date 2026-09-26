@@ -26,6 +26,15 @@ describe("market reducer", () => {
     expect(state.resultCollected).toBe(false);
   });
 
+  it("keeps steering notes with the job they belong to", () => {
+    const steered = {
+      v: 1, seq: 99, t: 5, job_id: "j_7f3a91c2", type: "steered",
+      data: { target: "sonnet", note: "Cite a source." },
+    } as AbyssEvent;
+    const state = reduce(initialState, steered);
+    expect(state.steering).toEqual([{ jobId: "j_7f3a91c2", target: "sonnet", note: "Cite a source." }]);
+  });
+
   it("ignores and reports unknown event types", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const unknown = {
