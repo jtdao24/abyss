@@ -27,11 +27,11 @@ Each task is one Codex session. Paste the whole task block into Codex together w
 |---|---|---|---|---|---|---|
 | T00 | SPEC, fixture, tasks | orch | 0 | — | 1h | ✅ done |
 | T01 | Backend skeleton, config, pricing, ledger, contract validator | B | 1 | T00 | 1.5h | ✅ merged |
-| T02 | LLM gateway (real + fake), ledger-wired | B | 1 | T01 | 2h | ⬜ |
-| T03 | Reputation store + scoring (pure) | B | 1 | T01 | 1h | ⬜ |
-| T04 | Prompts: orchestrator, bid, work, review | B | 1 | T02, T03 | 2h | ⬜ |
-| T05 | Market loop, event stream, headless CLI | B | 1 | T04 | 2.5h | ⬜ |
-| T06 | FastAPI WebSocket server | B | 2 | T05 | 1.5h | ⬜ |
+| T02 | LLM gateway (real + fake), ledger-wired | B | 1 | T01 | 2h | ✅ merged |
+| T03 | Reputation store + scoring (pure) | B | 1 | T01 | 1h | ✅ merged |
+| T04 | Prompts: orchestrator, bid, work, review | B | 1 | T02, T03 | 2h | ✅ merged |
+| T05 | Market loop, event stream, headless CLI | B | 1 | T04 | 2.5h | ✅ merged |
+| T06 | FastAPI WebSocket server | B | 2 | T05 | 1.5h | ✅ merged |
 | T07 | Web skeleton, contract types, fixture source, reducer, debug UI | F | 3 | T00 | 2.5h | ⬜ |
 | T08 | Static pixel scene | F | 3 | T07 | 4h | ⬜ |
 | T09 | Animation director | F | 4 | T08 | 5h | ⬜ |
