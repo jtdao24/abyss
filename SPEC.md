@@ -161,7 +161,7 @@ for each task (sequential):
   → working → done → graded → rep_update → stats
 final
 ```
-`error` may appear anywhere. On failures the sequence for that task stops early (§6).
+`error` may appear anywhere. On failures the sequence for that task stops early (§6), then emits `stats` as the last event in the task segment. A review failure makes `final.status` `"partial"`.
 In fixed mode (experiment only, `won.mode == "fixed"`), there are no `bid` events and no `rep_update`, and `graded.promised_quality` is `null`.
 `stats` is a **full snapshot of the current job**, never a delta. Clients replace their copy.
 

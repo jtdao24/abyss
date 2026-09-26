@@ -301,12 +301,16 @@ def _task_id(ev: dict) -> str | None:
     return ev["data"].get("task_id")
 
 
-def _task_errors(segment: list[dict], task_id: str) -> list[dict]:
-    return [
-        ev
-        for ev in segment
-        if ev["type"] == "error" and _task_id(ev) == task_id and not ev["data"]["fatal"]
-    ]
+def _failure_error_after(segment: list[dict], event: dict, task_id: str) -> bool:
+    event_index = next(
+        index for index, candidate in enumerate(segment) if candidate is event
+    )
+    return any(
+        candidate["type"] == "error"
+        and _task_id(candidate) == task_id
+        and not candidate["data"]["fatal"]
+        for candidate in segment[event_index + 1 : -1]
+    )
 
 
 def _check_task_identity(events: list[dict], task_id: str) -> None:
@@ -319,8 +323,9 @@ def _check_task_identity(events: list[dict], task_id: str) -> None:
 
 def _validate_task_segment(segment: list[dict], task: dict, index: int, total: int) -> bool:
     task_id = task["task_id"]
+    if not segment or segment[-1]["type"] != "stats":
+        raise ValueError(f"task {task_id} segment must end with stats")
     non_errors = [ev for ev in segment if ev["type"] != "error"]
-    errors = _task_errors(segment, task_id)
     _check_task_identity(non_errors, task_id)
 
     posted = non_errors[0]
@@ -351,8 +356,12 @@ def _validate_task_segment(segment: list[dict], task: dict, index: int, total: i
         if len(bids) != 3 or set(agents) != {"haiku", "sonnet", "opus"}:
             raise ValueError(f"task {task_id} must receive one bid from each agent")
 
-    if cursor == len(non_errors):
-        if not bids or any(bid["data"]["ok"] for bid in bids) or not errors:
+    if cursor == len(non_errors) - 1 and non_errors[cursor]["type"] == "stats":
+        if (
+            not bids
+            or any(bid["data"]["ok"] for bid in bids)
+            or not _failure_error_after(segment, bids[-1], task_id)
+        ):
             raise ValueError(f"task {task_id} ended before won without all bids failing")
         return True
 
@@ -367,11 +376,11 @@ def _validate_task_segment(segment: list[dict], task: dict, index: int, total: i
 
     expected_tail = ["stats", "working", "done", "graded"]
     for expected_type in expected_tail:
-        if cursor == len(non_errors):
-            if expected_type not in {"done", "graded"} or not errors:
-                raise ValueError(f"task {task_id} ended before {expected_type}")
-            return True
         ev = non_errors[cursor]
+        if ev["type"] == "stats" and expected_type in {"done", "graded"}:
+            previous = non_errors[cursor - 1]
+            if _failure_error_after(segment, previous, task_id):
+                return True
         if ev["type"] != expected_type:
             raise ValueError(
                 f"task {task_id} expected {expected_type}, got {ev['type']}"
@@ -379,6 +388,12 @@ def _validate_task_segment(segment: list[dict], task: dict, index: int, total: i
         if expected_type in {"working", "done", "graded"}:
             if ev["data"]["agent_id"] != winner:
                 raise ValueError(f"task {task_id} winner changed during execution")
+        if expected_type == "graded":
+            promised_quality = ev["data"]["promised_quality"]
+            if (mode == "fixed") != (promised_quality is None):
+                raise ValueError(
+                    f"task {task_id} graded.promised_quality does not match won.mode"
+                )
         cursor += 1
 
     if mode == "auction":

@@ -40,6 +40,7 @@ SPLIT_EFFORT = "low"
 
 ORCHESTRATOR_MODEL = "claude-sonnet-5"
 REVIEWER_MODEL = "claude-sonnet-5"
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def real_models() -> bool:
@@ -55,11 +56,13 @@ def fake_delay() -> float:
 
 
 def ledger_path() -> Path:
-    return Path(os.getenv("ABYSS_LEDGER_PATH", "runs/ledger.jsonl"))
+    override = os.getenv("ABYSS_LEDGER_PATH")
+    return Path(override) if override is not None else REPO_ROOT / "runs" / "ledger.jsonl"
 
 
 def rep_path() -> Path:
-    return Path(os.getenv("ABYSS_REP_PATH", "runs/reputation.json"))
+    override = os.getenv("ABYSS_REP_PATH")
+    return Path(override) if override is not None else REPO_ROOT / "runs" / "reputation.json"
 
 
 def resolve_model(nominal: str) -> str:
