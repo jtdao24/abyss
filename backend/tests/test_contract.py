@@ -175,6 +175,8 @@ def test_split_failure_is_valid(fixture_events: list[dict]) -> None:
         status="error",
         deliverable_task_id=None,
         deliverable=None,
+        filename=None,
+        summary=None,
         tasks=[],
         total_cost_usd=0.0,
         mean_grade=None,

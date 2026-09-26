@@ -15,15 +15,15 @@ describe("market reducer", () => {
     expect(state.tasks.t2.winner).toBe("sonnet");
     expect(state.tasks.t3.status).toBe("graded");
     expect(state.tasks.t3.winner).toBe("opus");
-    expect(state.stats?.total_cost_usd).toBe(0.06928);
-    expect(state.final?.total_cost_usd).toBe(0.06928);
+    expect(state.stats?.total_cost_usd).toBe(0.07598);
+    expect(state.final?.total_cost_usd).toBe(0.07598);
+    expect(state.final?.filename).toBe("tides_explainer.md");
     expect(state.agents.haiku?.reputation.research).toBe(0.925);
     expect(state.agents.opus?.reputation.checking).toBe(0.97);
-    expect(state.log).toHaveLength(37);
+    expect(state.log).toHaveLength(39);
     expect(state.history).toHaveLength(1);
-    expect(state.history[0].final.total_cost_usd).toBe(0.06928);
+    expect(state.history[0].final.total_cost_usd).toBe(0.07598);
     expect(state.history[0].jobText).toMatch(/two high tides/);
-    expect(state.resultCollected).toBe(false);
   });
 
   it("keeps steering notes with the job they belong to", () => {

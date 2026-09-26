@@ -11,6 +11,7 @@ def _record_fixture_usage(ledger: Ledger, events: list[dict]) -> None:
         "bid": "bid",
         "done": "work",
         "graded": "review",
+        "assembled": "assemble",
     }
     for event in events:
         purpose = purposes.get(event["type"])

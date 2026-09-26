@@ -2,7 +2,7 @@
 
 export type AgentId = "haiku" | "sonnet" | "opus";
 export type TaskType = "research" | "writing" | "checking";
-export type Purpose = "split" | "bid" | "work" | "review";
+export type Purpose = "split" | "bid" | "work" | "review" | "assemble";
 
 export interface Usage {
   model: string;
@@ -146,6 +146,9 @@ export interface FinalData {
   status: "ok" | "partial" | "error";
   deliverable_task_id: string | null;
   deliverable: string | null;
+  /** The main agent's file name for the deliverable (the terminal saves it to Downloads). */
+  filename: string | null;
+  summary: string | null;
   tasks: FinalTask[];
   total_cost_usd: number;
   mean_grade: number | null;
@@ -156,6 +159,12 @@ export interface ErrorData {
   message: string;
   task_id: string | null;
   fatal: boolean;
+}
+
+export interface AssembledData {
+  filename: string;
+  summary: string;
+  usage: Usage;
 }
 
 export interface SteeredData {
@@ -185,7 +194,8 @@ export type AbyssEvent =
   | Envelope<"stats", StatsData>
   | Envelope<"final", FinalData>
   | Envelope<"error", ErrorData>
-  | Envelope<"steered", SteeredData>;
+  | Envelope<"steered", SteeredData>
+  | Envelope<"assembled", AssembledData>;
 
 export type ClientMsg =
   | { type: "start_job"; job: string; price_weight?: number }

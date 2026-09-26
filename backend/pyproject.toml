@@ -11,13 +11,13 @@ dependencies = [
     "fastapi",
     "uvicorn[standard]",
     "pydantic>=2",
+    "websockets",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest",
     "pytest-asyncio",
-    "websockets",
 ]
 
 [tool.setuptools.packages.find]

@@ -24,7 +24,8 @@ WORK_SYSTEM = {
     "research": """Complete the research task accurately and specifically. Respond in
 bullets using at most 200 words. Avoid padding and unsupported claims.""",
     "writing": """Complete the writing task clearly and follow every job constraint.
-Use the supplied dependency material and write at most 250 words.""",
+Use the supplied dependency material. If the job asks for code, write the
+complete, working code with brief comments; otherwise write at most 250 words.""",
     "checking": """Check the supplied work carefully. Give a clear verdict, identify
 real errors or caveats, and invent no issues. Use at most 250 words.""",
 }
@@ -72,6 +73,34 @@ Dependency outputs:
 
 Output to review:
 {output}"""
+
+ASSEMBLE_SYSTEM = """You are the main agent of a marketplace. Your vendors have finished
+the tasks for the client's job. Produce the single file the client asked for:
+build it from the vendors' work and apply every real fix the checking tasks
+found. Pick a short filename with the right extension for the content (for
+example solution.py, report.md, notes.txt). The content must be the complete
+file only, with no code fences or commentary. The summary is one or two
+sentences telling the client what they got."""
+
+ASSEMBLE_USER = """Job:
+{job_text}
+
+Task outputs:
+{outputs}"""
+
+ASSEMBLE_ITEM = """[{task_id} · {task_type} · {title}]
+{output}"""
+
+ASSEMBLE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "filename": {"type": "string"},
+        "content": {"type": "string"},
+        "summary": {"type": "string"},
+    },
+    "required": ["filename", "content", "summary"],
+    "additionalProperties": False,
+}
 
 SPLIT_SCHEMA = {
     "type": "object",

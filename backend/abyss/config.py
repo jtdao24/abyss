@@ -37,6 +37,7 @@ WORK_EFFORT = "medium"
 BID_EFFORT = "low"
 REVIEW_EFFORT = "low"
 SPLIT_EFFORT = "low"
+ASSEMBLE_EFFORT = "medium"
 
 ORCHESTRATOR_MODEL = "claude-sonnet-5"
 REVIEWER_MODEL = "claude-sonnet-5"

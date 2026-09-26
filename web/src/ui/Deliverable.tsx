@@ -1,16 +1,13 @@
-import type { AgentSpec, FinalData } from "../contract";
+import type { FinalData } from "../contract";
 import { VENDOR } from "../scene/model";
 
-interface ResultViewProps {
-  final: FinalData;
-  agents: Partial<Record<string, AgentSpec>>;
-}
-
-/** A finished job: the deliverable, who did each task, grades and costs. */
-export function ResultView({ final, agents }: ResultViewProps) {
+/** A finished job: the main agent's file, who did each task, grades and costs. */
+export function ResultView({ final }: { final: FinalData }) {
   return (
     <div className="result-view">
-      <p className="deliverable-text">{final.deliverable ?? "No deliverable produced."}</p>
+      {final.filename && <p className="file-name">📄 {final.filename} <em>saved to Downloads by the terminal</em></p>}
+      {final.summary && <p className="rpg-hint">{final.summary}</p>}
+      <pre className="deliverable-text">{final.deliverable ?? "No deliverable produced."}</pre>
       <table>
         <thead>
           <tr><th>Task</th><th>Vendor</th><th>Grade / promised</th><th>Cost</th></tr>

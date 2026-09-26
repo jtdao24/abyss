@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
 
 AgentId = Literal["haiku", "sonnet", "opus"]
 TaskType = Literal["research", "writing", "checking"]
-Purpose = Literal["split", "bid", "work", "review"]
+Purpose = Literal["split", "bid", "work", "review", "assemble"]
 JobId = Annotated[str, Field(pattern=r"^j_[0-9a-f]{8}$")]
 TaskId = Annotated[str, Field(pattern=r"^t[1-9][0-9]*$")]
 NonNegativeInt = Annotated[int, Field(ge=0)]
@@ -202,6 +202,7 @@ class PurposeBreakdown(ContractModel):
     bid: PurposeStats
     work: PurposeStats
     review: PurposeStats
+    assemble: PurposeStats
 
 
 class AgentStats(ContractModel):
@@ -236,10 +237,15 @@ class FinalTask(ContractModel):
     cost_usd: NonNegativeFloat
 
 
+FileName = Annotated[str, Field(pattern=r"^[A-Za-z0-9._ -]{1,80}$")]
+
+
 class FinalData(ContractModel):
     status: Literal["ok", "partial", "error"]
     deliverable_task_id: TaskId | None
     deliverable: str | None
+    filename: FileName | None
+    summary: str | None
     tasks: list[FinalTask]
     total_cost_usd: NonNegativeFloat
     mean_grade: Annotated[float, Field(ge=1, le=10)] | None
@@ -247,9 +253,17 @@ class FinalData(ContractModel):
 
     @model_validator(mode="after")
     def validate_deliverable_fields(self) -> "FinalData":
-        if (self.deliverable_task_id is None) != (self.deliverable is None):
-            raise ValueError("deliverable id and text must both be null or both be set")
+        if (self.filename is None) != (self.deliverable is None):
+            raise ValueError("filename and deliverable must both be null or both be set")
+        if self.deliverable_task_id is not None and self.deliverable is None:
+            raise ValueError("a deliverable task needs a deliverable")
         return self
+
+
+class AssembledData(ContractModel):
+    filename: FileName
+    summary: Annotated[str, Field(max_length=300)]
+    usage: Usage
 
 
 class ErrorData(ContractModel):
@@ -286,6 +300,7 @@ DATA_MODELS: dict[str, type[ContractModel]] = {
     "final": FinalData,
     "error": ErrorData,
     "steered": SteeredData,
+    "assembled": AssembledData,
 }
 # Events that may appear anywhere in a job and are not part of the task sequence.
 ASIDE = {"error", "steered"}
@@ -331,6 +346,9 @@ def _check_task_identity(events: list[dict], task_id: str) -> None:
 
 def _validate_task_segment(segment: list[dict], task: dict, index: int, total: int) -> bool:
     task_id = task["task_id"]
+    # Job-level asides (a steer note, an assembly error) may follow the task's last stats.
+    while segment and segment[-1]["type"] in ASIDE and _task_id(segment[-1]) is None:
+        segment = segment[:-1]
     if not segment or segment[-1]["type"] != "stats":
         raise ValueError(f"task {task_id} segment must end with stats")
     non_errors = [ev for ev in segment if ev["type"] not in ASIDE]
@@ -423,6 +441,7 @@ def _validate_task_segment(segment: list[dict], task: dict, index: int, total: i
 def _validate_job(job_id: str, events: list[dict]) -> None:
     if events[-1]["type"] != "final":
         raise ValueError(f"final must be the last event for job {job_id}")
+    events = _strip_assembly(events)
 
     non_errors = [ev for ev in events if ev["type"] not in ASIDE]
     split_events = [ev for ev in non_errors if ev["type"] == "job_split"]
@@ -481,6 +500,23 @@ def _validate_job(job_id: str, events: list[dict]) -> None:
         raise ValueError(
             f"final.status must be {expected_status!r} for this task outcome"
         )
+
+
+def _strip_assembly(events: list[dict]) -> list[dict]:
+    """The main agent's packaging step comes after the last task: assembled,
+    then a stats snapshot, then final. Check that and drop both events so the
+    task segments validate as before."""
+    positions = [i for i, ev in enumerate(events) if ev["type"] == "assembled"]
+    if not positions:
+        return events
+    if len(positions) > 1:
+        raise ValueError("a job can be assembled at most once")
+    i = positions[0]
+    after = [ev for ev in events[i + 1 :] if ev["type"] not in ASIDE]
+    if [ev["type"] for ev in after] != ["stats", "final"]:
+        raise ValueError("assembled must be followed by stats and then final")
+    stats = after[0]
+    return [ev for ev in events if ev is not events[i] and ev is not stats]
 
 
 def validate_stream(events: list[dict]) -> None:

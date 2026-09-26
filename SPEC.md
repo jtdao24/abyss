@@ -100,7 +100,7 @@ cost_usd(model, in, out, cache_read=0, cache_write=0)
   new   = old + REP_ALPHA × (ratio − old)
   ```
   So `promised_quality × reputation` ≈ the quality the agent is expected to deliver. Overpromisers get discounted, and honest agents stay near 1.0.
-- **Deliverable** = the output of the last *successfully done* `writing` task. If there is none, it's the last successfully done task of any type. If there is none of those either, it's `null`.
+- **Deliverable (a file).** After the last task, the main agent (orchestrator model) makes one `assemble` call: it reads every finished task's output plus the job-wide steering notes, applies the checking tasks' fixes, and returns `{filename, content, summary}`. The filename is sanitised (no folders, ordinary characters, keeps its extension). If assembling fails twice, the job still delivers: the content is the last successfully done `writing` task's output (else the last done task's), the filename is `abyss_result.md`, and a non-fatal `error` says so. With no finished task there is no file (`null`). The terminal chat saves the file to `~/Downloads`.
 - **Order.** Tasks run **sequentially** in split order. Every event still carries `task_id`, so the frontend must key everything by `task_id` and must not assume order.
 
 ## 5. Ledger
@@ -111,7 +111,7 @@ One entry per LLM call, **including calls that fail**. `backend/abyss/llm.py` is
 {
   "id": "c_0001", "ts": 1759000000.123, "job_id": "j_7f3a91c2",
   "task_id": "t1" | null, "agent_id": "haiku" | null,
-  "purpose": "split" | "bid" | "work" | "review",
+  "purpose": "split" | "bid" | "work" | "review" | "assemble",
   "model": "claude-haiku-4-5",
   "input_tokens": 350, "output_tokens": 60,
   "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0,
@@ -159,6 +159,7 @@ job_split → stats
 for each task (sequential):
   task_posted → bid ×3 (any order) → won → stats
   → working → done → graded → rep_update → stats
+assembled → stats          (the main agent packages the file; skipped if no task finished or assembling failed)
 final
 ```
 `error` may appear anywhere. On failures the sequence for that task stops early (§6), then emits `stats` as the last event in the task segment. A review failure makes `final.status` `"partial"`.
@@ -190,8 +191,9 @@ type Usage = {                // one LLM call, from resp.usage
 | `done` | `{ task_id, agent_id, output, predicted_output_tokens\|null, predicted_cost_usd\|null, usage: Usage }`. The actual tokens are in `usage`. |
 | `graded` | `{ task_id, agent_id, grade, promised_quality\|null, rationale, usage: Usage }`. `usage.model` is the reviewer's model. |
 | `rep_update` | `{ task_id, agent_id, task_type, old, new, ratio }` |
-| `stats` | `{ total_cost_usd, input_tokens, output_tokens, calls, by_purpose: {split\|bid\|work\|review: {cost_usd, calls}}, by_agent: {[AgentId]: {cost_usd, input_tokens, output_tokens, calls, tasks_won}} }`. `by_agent` counts only `bid` and `work` calls. All four purposes and all three agents are always present. |
-| `final` | `{ status: "ok"\|"partial"\|"error", deliverable_task_id\|null, deliverable\|null, tasks: [{task_id, type, agent_id\|null, grade\|null, promised_quality\|null, cost_usd}], total_cost_usd, mean_grade\|null, duration_ms }`. `tasks[].cost_usd` = every ledger entry for that task (bids + work + review). `total_cost_usd` also includes the split. `mean_grade` is over graded tasks only (2 dp). |
+| `stats` | `{ total_cost_usd, input_tokens, output_tokens, calls, by_purpose: {split\|bid\|work\|review\|assemble: {cost_usd, calls}}, by_agent: {[AgentId]: {cost_usd, input_tokens, output_tokens, calls, tasks_won}} }`. `by_agent` counts only `bid` and `work` calls. All five purposes and all three agents are always present. |
+| `assembled` | `{ filename, summary, usage: Usage }`. The main agent packaged the file. |
+| `final` | `{ status: "ok"\|"partial"\|"error", deliverable_task_id\|null, deliverable\|null, filename\|null, summary\|null, tasks: [{task_id, type, agent_id\|null, grade\|null, promised_quality\|null, cost_usd}], total_cost_usd, mean_grade\|null, duration_ms }`. `tasks[].cost_usd` = every ledger entry for that task (bids + work + review). `total_cost_usd` also includes the split and the assemble call. `mean_grade` is over graded tasks only (2 dp). `deliverable` is the file content and `filename` its name; both are set or both `null`. `deliverable_task_id` is set only when the file is a fallback copy of a task's output. |
 | `error` | `{ message, task_id\|null, fatal: bool }` |
 | `steered` | `{ target: "job"\|AgentId, note }`. Acknowledges a `steer` message; may appear anywhere in a job, like `error`. |
 
@@ -207,7 +209,7 @@ WebSocket `ws://localhost:8000/ws`, JSON text frames.
 | `steer` | `{type, target: "job"\|AgentId, note: string (1–500 chars)}` | Only while a job runs. Adds a note to that job: `"job"` notes go to every remaining work and review prompt; an agent's notes go to that agent's work (and its review). Notes are read when each work call starts, so they apply from the next piece of work on; a call already running is not changed. Replies `steered`, or `error{fatal:false}` if no job is running or the message is invalid. |
 | `reset` | `{type}` | Resets reputation to `REP_INIT` for everyone, persists it and re-sends `hello`. Rejected while a job runs. |
 
-A disconnect cancels that connection's running job. Reputation is **global to the server process**: it's shared across connections, persisted to `ABYSS_REP_PATH` after every update and loaded on startup.
+**One shared market.** There is at most one job at a time for the whole server. Any connection (the terminal chat, a browser view) may start or steer it, and every job event is broadcast to every connection. Each connection gets its own `hello` at `seq: 0`; job events carry one server-wide `seq` (so each connection still sees strictly increasing numbers). A connection that joins mid-job first receives the current job's events so far. Closing a connection never cancels the job. Reputation is **global to the server process**: it's shared across connections, persisted to `ABYSS_REP_PATH` after every update and loaded on startup.
 
 HTTP routes: `GET /health` returns `{"ok": true}`.
 
@@ -233,3 +235,4 @@ runs/         (gitignored) ledger.jsonl, reputation.json, recordings
 - **v1 clarification (T01 review):** a failed task segment still ends with `stats`, and a review failure makes `final.status = "partial"`. The wire format is unchanged, so this is not a version bump.
 - **v1 clarification (T01 review):** `runs/` paths are relative to the repo root, not the working directory.
 - **v1 addition (steering):** client message `steer` and server event `steered`. Additive, so still `v: 1`; older clients ignore the new event.
+- **v1 change (files + shared market):** the main agent's `assemble` step (new purpose, `assembled` event, `final.filename`/`final.summary`), and one shared, broadcast market instead of a job per connection. Jobs are given from the terminal chat (`python -m abyss.chat`); the browser is a live view. Fixture, validator and both clients changed in the same commit.

@@ -48,8 +48,6 @@ export interface SceneModel {
   reviewing: boolean;
   /** What the main agent (orchestrator) says. */
   mainAgent: string;
-  /** A finished result is waiting at the mainAgent for the player to collect. */
-  resultReady: boolean;
   finalBanner: string | null;
 }
 
@@ -148,12 +146,14 @@ export function sceneModel(state: MarketState): SceneModel {
     ? `JOB ${state.final.status.toUpperCase()} - GRADE ${state.final.mean_grade ?? "-"} - $${state.final.total_cost_usd.toFixed(4)}`
     : null;
 
-  const resultReady = state.final !== null && !state.resultCollected;
-  const mainAgent = resultReady
-    ? "YOUR JOB IS READY!"
-    : state.final
-      ? "ANY MORE JOBS?"
-    : state.taskOrder.length > 0
+  const tasksFinished =
+    state.taskOrder.length > 0 &&
+    state.taskOrder.every((id) => ["graded", "failed"].includes(state.tasks[id].status));
+  const mainAgent = state.final
+    ? state.final.filename ? `SENT ${state.final.filename.toUpperCase()}` : "JOB OVER"
+    : state.assembled || tasksFinished
+      ? "PACKAGING YOUR FILE..."
+      : state.taskOrder.length > 0
       ? `${state.taskOrder.length} TASKS POSTED`
       : state.currentJob || state.jobActive
         ? "SPLITTING JOB..."
@@ -167,7 +167,6 @@ export function sceneModel(state: MarketState): SceneModel {
     review,
     reviewing: task?.status === "done",
     mainAgent,
-    resultReady,
     finalBanner,
   };
 }

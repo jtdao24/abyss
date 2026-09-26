@@ -329,7 +329,14 @@ th { color: #7fb7b6; }
 .archive-row { display: flex; width: 100%; justify-content: space-between; gap: 10px; padding: 4px 0; text-align: left; background: none; border: 0; cursor: pointer; font: inherit; color: inherit; }
 .archive-row em { color: #7a6a52; font-style: normal; white-space: nowrap; }
 
+.result-view .file-name { margin: 0 0 4px; font-family: "Silkscreen", monospace; font-size: 11px; color: #7a3e12; }
+.result-view .file-name em { color: #7a6a52; font-style: normal; font-size: 9px; }
 .result-view .deliverable-text {
+  max-height: 260px;
+  overflow: auto;
+  margin: 6px 0;
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
   white-space: pre-wrap;
   padding: 10px;
   background: #fff;

@@ -68,7 +68,7 @@ def stats_snapshot() -> dict:
     def zero_p():
         return {"cost_usd": 0.0, "calls": 0}
 
-    by_purpose = {p: zero_p() for p in ["split", "bid", "work", "review"]}
+    by_purpose = {p: zero_p() for p in ["split", "bid", "work", "review", "assemble"]}
     by_agent = {
         a["agent_id"]: {"cost_usd": 0.0, "input_tokens": 0, "output_tokens": 0, "calls": 0, "tasks_won": wins[a["agent_id"]]}
         for a in AGENTS
@@ -279,11 +279,23 @@ for i, task in enumerate(TASKS):
         "cost_usd": round(sum(e["usage"]["cost_usd"] for e in ledger if e["task_id"] == tid), 6),
     })
 
-deliverable_task = [x for x in TASKS if x["type"] == "writing"][-1]
+# The main agent packages the vendors' work into one file, applying the check's caveat.
+writing = [x for x in TASKS if x["type"] == "writing"][-1]["work"]["output"]
+FILENAME = "tides_explainer.md"
+CONTENT = writing.replace("most places see two high tides", "most places (not all: some coasts get one) see two high tides")
+SUMMARY = "A 140-word explainer on two daily high tides, with the fact-checker's caveat about one-tide coasts."
+au = usage(ORCH_MODEL, 1450, 380, 4300)
+ledger.append({"purpose": "assemble", "agent_id": None, "task_id": None, "usage": au})
+t += au["duration_ms"]
+emit(t, "assembled", {"filename": FILENAME, "summary": SUMMARY, "usage": au})
+emit(t + 10, "stats", stats_snapshot())
+t += 50
 emit(t, "final", {
     "status": "ok",
-    "deliverable_task_id": deliverable_task["task_id"],
-    "deliverable": deliverable_task["work"]["output"],
+    "deliverable_task_id": None,
+    "deliverable": "# Why two high tides a day?\n\n" + CONTENT.split("\n\n", 1)[1],
+    "filename": FILENAME,
+    "summary": SUMMARY,
     "tasks": final_tasks,
     "total_cost_usd": stats_snapshot()["total_cost_usd"],
     "mean_grade": round(sum(grades) / len(grades), 2),

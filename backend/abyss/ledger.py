@@ -9,8 +9,8 @@ from typing import Literal
 from .config import AGENTS, PRICES
 
 
-Purpose = Literal["split", "bid", "work", "review"]
-PURPOSES: tuple[Purpose, ...] = ("split", "bid", "work", "review")
+Purpose = Literal["split", "bid", "work", "review", "assemble"]
+PURPOSES: tuple[Purpose, ...] = ("split", "bid", "work", "review", "assemble")
 
 
 def cost_usd(

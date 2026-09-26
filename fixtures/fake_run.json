@@ -131,6 +131,10 @@
         "review": {
           "cost_usd": 0.0,
           "calls": 0
+        },
+        "assemble": {
+          "cost_usd": 0.0,
+          "calls": 0
         }
       },
       "by_agent": {
@@ -304,6 +308,10 @@
         "review": {
           "cost_usd": 0.0,
           "calls": 0
+        },
+        "assemble": {
+          "cost_usd": 0.0,
+          "calls": 0
         }
       },
       "by_agent": {
@@ -426,6 +434,10 @@
         "review": {
           "cost_usd": 0.0026,
           "calls": 1
+        },
+        "assemble": {
+          "cost_usd": 0.0,
+          "calls": 0
         }
       },
       "by_agent": {
@@ -601,6 +613,10 @@
         "review": {
           "cost_usd": 0.0026,
           "calls": 1
+        },
+        "assemble": {
+          "cost_usd": 0.0,
+          "calls": 0
         }
       },
       "by_agent": {
@@ -723,6 +739,10 @@
         "review": {
           "cost_usd": 0.00534,
           "calls": 2
+        },
+        "assemble": {
+          "cost_usd": 0.0,
+          "calls": 0
         }
       },
       "by_agent": {
@@ -898,6 +918,10 @@
         "review": {
           "cost_usd": 0.00534,
           "calls": 2
+        },
+        "assemble": {
+          "cost_usd": 0.0,
+          "calls": 0
         }
       },
       "by_agent": {
@@ -1020,6 +1044,10 @@
         "review": {
           "cost_usd": 0.00786,
           "calls": 3
+        },
+        "assemble": {
+          "cost_usd": 0.0,
+          "calls": 0
         }
       },
       "by_agent": {
@@ -1050,13 +1078,91 @@
   {
     "v": 1,
     "seq": 36,
-    "t": 41850,
+    "t": 46150,
+    "job_id": "j_7f3a91c2",
+    "type": "assembled",
+    "data": {
+      "filename": "tides_explainer.md",
+      "summary": "A 140-word explainer on two daily high tides, with the fact-checker's caveat about one-tide coasts.",
+      "usage": {
+        "model": "claude-sonnet-5",
+        "input_tokens": 1450,
+        "output_tokens": 380,
+        "cost_usd": 0.0067,
+        "duration_ms": 4300
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 37,
+    "t": 46160,
+    "job_id": "j_7f3a91c2",
+    "type": "stats",
+    "data": {
+      "total_cost_usd": 0.07598,
+      "input_tokens": 9650,
+      "output_tokens": 3908,
+      "calls": 17,
+      "by_purpose": {
+        "split": {
+          "cost_usd": 0.00414,
+          "calls": 1
+        },
+        "bid": {
+          "cost_usd": 0.029255,
+          "calls": 9
+        },
+        "work": {
+          "cost_usd": 0.028025,
+          "calls": 3
+        },
+        "review": {
+          "cost_usd": 0.00786,
+          "calls": 3
+        },
+        "assemble": {
+          "cost_usd": 0.0067,
+          "calls": 1
+        }
+      },
+      "by_agent": {
+        "haiku": {
+          "cost_usd": 0.00478,
+          "input_tokens": 1640,
+          "output_tokens": 628,
+          "calls": 4,
+          "tasks_won": 1
+        },
+        "sonnet": {
+          "cost_usd": 0.0152,
+          "input_tokens": 1900,
+          "output_tokens": 1140,
+          "calls": 4,
+          "tasks_won": 1
+        },
+        "opus": {
+          "cost_usd": 0.0373,
+          "input_tokens": 1860,
+          "output_tokens": 1120,
+          "calls": 4,
+          "tasks_won": 1
+        }
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 38,
+    "t": 46200,
     "job_id": "j_7f3a91c2",
     "type": "final",
     "data": {
       "status": "ok",
-      "deliverable_task_id": "t2",
-      "deliverable": "Why two high tides a day?\n\nThe Moon's gravity tugs on all of Earth, but not evenly. Water on the side facing the Moon is pulled a little harder than Earth's center, so it heaps into a bulge. On the far side, Earth's center is pulled harder than the distant water, which is left behind as a second bulge. As Earth spins, a coastline passes through both bulges, so most places see two high tides roughly every 24 hours and 50 minutes. The extra 50 minutes comes from the Moon moving along its orbit while we turn. The Sun adds a smaller tidal pull, about 46% of the Moon's; when the two line up at new and full moon, we get extra-high spring tides.",
+      "deliverable_task_id": null,
+      "deliverable": "# Why two high tides a day?\n\nThe Moon's gravity tugs on all of Earth, but not evenly. Water on the side facing the Moon is pulled a little harder than Earth's center, so it heaps into a bulge. On the far side, Earth's center is pulled harder than the distant water, which is left behind as a second bulge. As Earth spins, a coastline passes through both bulges, so most places (not all: some coasts get one) see two high tides roughly every 24 hours and 50 minutes. The extra 50 minutes comes from the Moon moving along its orbit while we turn. The Sun adds a smaller tidal pull, about 46% of the Moon's; when the two line up at new and full moon, we get extra-high spring tides.",
+      "filename": "tides_explainer.md",
+      "summary": "A 140-word explainer on two daily high tides, with the fact-checker's caveat about one-tide coasts.",
       "tasks": [
         {
           "task_id": "t1",
@@ -1083,9 +1189,9 @@
           "cost_usd": 0.029655
         }
       ],
-      "total_cost_usd": 0.06928,
+      "total_cost_usd": 0.07598,
       "mean_grade": 8.0,
-      "duration_ms": 41850
+      "duration_ms": 46200
     }
   }
 ]

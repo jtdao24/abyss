@@ -15,7 +15,7 @@ from . import config
 from .ledger import Ledger, cost_usd
 
 
-Purpose = Literal["split", "bid", "work", "review"]
+Purpose = Literal["split", "bid", "work", "review", "assemble"]
 NETWORK_TIMEOUT_SECONDS = 120.0
 THINKING_PAD = {
     "claude-haiku-4-5": 0,
@@ -447,6 +447,15 @@ def _fake_output(purpose: Purpose, user: str, digest: bytes) -> tuple[str, dict 
             "predicted_output_tokens": 150 + int.from_bytes(digest[:2], "big") % 551,
             "promised_quality": 6 + digest[2] % 5,
             "pitch": "A careful, concise result at a competitive price.",
+        }
+        return json.dumps(data), data
+    if purpose == "assemble":
+        code = any(word in user.lower() for word in ("python", "code", "function", "script", "program"))
+        body = user.split("Task outputs:", 1)[-1].strip()
+        data = {
+            "filename": "solution.py" if code else "result.md",
+            "content": ("# Assembled by the main agent (fake mode)\n" if code else "# Result (fake mode)\n\n") + body,
+            "summary": "Combined the vendors' work into one file and applied the checker's notes.",
         }
         return json.dumps(data), data
     if purpose == "review":

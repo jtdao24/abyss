@@ -10,7 +10,6 @@ import { Container, Graphics, type Sprite, type Text, type Ticker } from "pixi.j
 import type { AbyssEvent, AgentId, TaskType } from "../contract";
 import { AGENT_ORDER } from "./model";
 import { PALETTE, SPENT_POS, text, type MarketScene } from "./Scene";
-import { TaskProp } from "./taskfx";
 import { MAIN_AGENT_POS, REVIEWER_POS, REVIEW_SPOT, STALLS, WORLD, route, type Point } from "./world";
 
 const MAX_ACTIVE = 60;    // backlog guard: beyond this, finish every effect instantly
@@ -32,7 +31,8 @@ export class Director {
   private readonly carrying = {} as Record<AgentId, Graphics>;
   /** What each task is, so a vendor's work animation matches its task type. */
   private readonly taskTypes = new Map<string, TaskType>();
-  private readonly props = new Map<AgentId, TaskProp>();
+  /** Vendors currently working, and on what kind of task. */
+  private readonly working = new Map<AgentId, TaskType>();
   private clock = 0;
 
   constructor(
@@ -54,7 +54,7 @@ export class Director {
   destroy(): void {
     this.scene.app.ticker.remove(this.tick);
     this.finishAll();
-    for (const agentId of AGENT_ORDER) this.stopProp(agentId);
+    for (const agentId of AGENT_ORDER) this.stopWork(agentId);
   }
 
   onEvent(ev: AbyssEvent): void {
@@ -82,12 +82,12 @@ export class Director {
       }
       case "working": {
         const type = this.taskTypes.get(ev.data.task_id);
-        if (type) this.startProp(ev.data.agent_id, type);
+        if (type) this.working.set(ev.data.agent_id, type);
         break;
       }
       case "done": {
         const agentId = ev.data.agent_id;
-        this.stopProp(agentId);
+        this.stopWork(agentId);
         this.carrying[agentId].visible = true;
         const coins = Math.max(1, Math.min(14, Math.round(ev.data.usage.cost_usd * 1000)));
         const home = STALLS[agentId].home;
@@ -117,7 +117,7 @@ export class Director {
         if (ev.data.task_id) {
           for (const agentId of AGENT_ORDER) {
             this.carrying[agentId].visible = false;
-            this.stopProp(agentId);
+            this.stopWork(agentId);
           }
         }
         if (ev.data.fatal) this.sendEveryoneHome();
@@ -144,24 +144,14 @@ export class Director {
     }
   }
 
-  private startProp(agentId: AgentId, type: TaskType): void {
-    this.stopProp(agentId);
-    const prop = new TaskProp(type);
-    const { cx } = STALLS[agentId];
-    prop.position.set(cx + 80, 388);
-    prop.scale.set(1.4);
-    this.scene.fx.addChild(prop);
-    this.props.set(agentId, prop);
-  }
-
-  private stopProp(agentId: AgentId): void {
-    this.props.get(agentId)?.destroy({ children: true });
-    this.props.delete(agentId);
+  private stopWork(agentId: AgentId): void {
+    this.working.delete(agentId);
+    resetPose(this.scene.vendors[agentId]);
   }
 
   private sendEveryoneHome(): void {
     for (const agentId of AGENT_ORDER) {
-      this.stopProp(agentId);
+      this.stopWork(agentId);
       this.carrying[agentId].visible = false;
       this.walk(agentId, STALLS[agentId].home);
     }
@@ -241,12 +231,9 @@ export class Director {
       const scroll = this.carrying[agentId];
       if (scroll.visible) scroll.position.set(v.x + 20, v.y - 40);
     }
-    for (const [agentId, prop] of this.props) {
-      // a vendor still walking back carries the work; at the stall it sits on the counter
-      const v = this.scene.vendors[agentId];
-      if (this.routes[agentId].length > 0) prop.position.set(v.x + 34, v.y - 70);
-      else prop.position.set(STALLS[agentId].cx + 80, 388);
-      prop.update(ticker.deltaMS);
+    for (const [agentId, type] of this.working) {
+      // at the stall the vendor's own body shows the kind of work (walking has its waddle)
+      if (this.routes[agentId].length === 0) workPose(this.scene.vendors[agentId], type, this.clock);
     }
     for (let i = this.tweens.length - 1; i >= 0; i -= 1) {
       const tween = this.tweens[i];
@@ -261,4 +248,36 @@ export class Director {
       }
     }
   };
+}
+
+/** The vendor's body acts out the work: search, scribble or nod. */
+function workPose(sprite: Sprite, type: TaskType, clock: number): void {
+  const base = Math.abs(sprite.scale.x) || 1; // width is only ever flipped, never squashed
+  resetPose(sprite);
+  if (type === "research") {
+    // look one way, then the other, leaning in, with a small hop on each turn
+    const phase = Math.floor(clock / 1100) % 2 === 0 ? 1 : -1;
+    const inTurn = (clock % 1100) / 1100;
+    sprite.scale.x = base * phase;
+    sprite.skew.x = 0.12 * phase;
+    sprite.pivot.y = inTurn < 0.18 ? Math.sin((inTurn / 0.18) * Math.PI) * 9 : Math.sin(clock / 260) * 1.5;
+  } else if (type === "writing") {
+    // hunched over, scribbling fast
+    sprite.skew.x = 0.07 * Math.sign(sprite.scale.x || 1);
+    sprite.rotation = Math.sin(clock / 70) * 0.05;
+    sprite.pivot.y = Math.abs(Math.sin(clock / 95)) * 4;
+  } else {
+    // steady nods while ticking things off, swaying a little between them
+    const nod = Math.max(0, Math.sin(clock / 230));
+    sprite.scale.y = base * (1 - 0.08 * nod);
+    sprite.rotation = 0.06 * nod * Math.sign(sprite.scale.x || 1) + Math.sin(clock / 900) * 0.03;
+  }
+}
+
+function resetPose(sprite: Sprite): void {
+  const base = Math.abs(sprite.scale.x) || 1;
+  sprite.scale.y = base;
+  sprite.skew.set(0, 0);
+  sprite.pivot.y = 0;
+  sprite.rotation = 0;
 }

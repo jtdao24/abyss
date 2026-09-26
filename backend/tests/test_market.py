@@ -95,7 +95,11 @@ async def test_fake_run_validates_and_ledger_matches(monkeypatch, tmp_path) -> N
     task_count = len(
         next(event for event in events if event["type"] == "job_split")["data"]["tasks"]
     )
-    assert len(result.ledger.entries()) == 1 + 3 * task_count + task_count + task_count
+    # split + 3 bids, 1 work and 1 review per task + the main agent's assemble call
+    assert len(result.ledger.entries()) == 1 + 3 * task_count + task_count + task_count + 1
+    assembled = next(event for event in events if event["type"] == "assembled")
+    assert result.final["filename"] == assembled["data"]["filename"]
+    assert result.final["deliverable"]
     lines = [json.loads(line) for line in ledger_path.read_text().splitlines()]
     total = round(
         sum(line["cost_usd"] for line in lines if line["job_id"] == result.job_id),

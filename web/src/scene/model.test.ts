@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import fixture from "../../public/fixtures/fake_run.json";
 import type { AbyssEvent } from "../contract";
-import { collectResult, initialState, reduce, type MarketState } from "../state/reducer";
+import { initialState, reduce, type MarketState } from "../state/reducer";
 import { sceneModel } from "./model";
 
 const events = fixture as AbyssEvent[];
@@ -52,19 +52,17 @@ describe("sceneModel", () => {
   it("ends with every card graded, the final banner, and the fixture total", () => {
     const model = sceneModel(events.reduce(reduce, initialState));
     expect(model.cards.map((c) => c.status)).toEqual(["graded", "graded", "graded"]);
-    expect(model.finalBanner).toBe("JOB OK - GRADE 8 - $0.0693");
-    expect(model.spent).toBe("SPENT $0.0693");
+    expect(model.finalBanner).toBe("JOB OK - GRADE 8 - $0.0760");
+    expect(model.spent).toBe("SPENT $0.0760");
     expect(model.review).toEqual({ text: "T3 9/10", tone: "ok" });
     expect(model.reviewing).toBe(false);
-    expect(model.mainAgent).toBe("YOUR JOB IS READY!");
-    expect(model.resultReady).toBe(true);
+    expect(model.mainAgent).toBe("SENT TIDES_EXPLAINER.MD");
   });
 
-  it("stops announcing the result once the player collects it", () => {
-    const done = events.reduce(reduce, initialState);
-    const model = sceneModel(collectResult(done));
-    expect(model.resultReady).toBe(false);
-    expect(model.mainAgent).toBe("ANY MORE JOBS?");
+  it("shows the main agent packaging the file once every task is graded", () => {
+    const state = stateAfter((ev) => ev.type === "assembled");
+    expect(sceneModel(state).mainAgent).toBe("PACKAGING YOUR FILE...");
+    expect(state.assembled?.filename).toBe("tides_explainer.md");
   });
 
   it("renders an empty market before any job", () => {

@@ -6,6 +6,7 @@ from dataclasses import asdict, dataclass, field
 
 from . import config
 from .agents import build_work_prompt, do_work, est_input_tokens, request_bid
+from .assembler import DEFAULT_FILENAME, assemble
 from .events import EventStream, new_job_id
 from .ledger import Ledger
 from .llm import LLM, LLMError
@@ -238,6 +239,7 @@ async def run_job(
         )
 
     status = "partial" if task_failed else "ok"
+    packaged = await _package(stream, llm, ledger, tasks_won, job_text, completed, guidance)
     final = _final_data(
         status=status,
         tasks=final_tasks,
@@ -245,9 +247,41 @@ async def run_job(
         grades=grades,
         ledger=ledger,
         started=started,
+        packaged=packaged,
     )
     await stream.emit("final", final)
     return JobResult(job_id, status, final["deliverable"], ledger, final)
+
+
+async def _package(
+    stream: EventStream,
+    llm: LLM,
+    ledger: Ledger,
+    tasks_won: dict[str, int],
+    job_text: str,
+    completed: list[tuple[TaskSpec, str]],
+    guidance: Guidance | None,
+) -> tuple[str, str, str] | None:
+    """The main agent turns the finished work into one file: (filename, content, summary)."""
+    if not completed:
+        return None
+    last_error = ""
+    for _ in range(2):
+        try:
+            filename, content, summary, usage = await assemble(
+                llm, ledger, job_text, completed, guidance.job if guidance else None
+            )
+        except (LLMError, ValueError) as exc:
+            last_error = str(exc)
+            continue
+        await stream.emit("assembled", {"filename": filename, "summary": summary, "usage": usage})
+        await stream.emit("stats", ledger.stats(tasks_won))
+        return filename, content, summary
+    await stream.emit(
+        "error",
+        {"message": f"could not assemble the file, sending the last draft: {last_error}", "task_id": None, "fatal": False},
+    )
+    return None
 
 
 async def _get_tasks(
@@ -454,19 +488,29 @@ def _final_data(
     grades: list[int],
     ledger: Ledger,
     started: float,
+    packaged: tuple[str, str, str] | None = None,
 ) -> dict:
+    """The main agent's file when it assembled one; otherwise the last draft."""
     deliverable_task: tuple[TaskSpec, str] | None = None
     writing = [item for item in completed if item[0].type == "writing"]
     if writing:
         deliverable_task = writing[-1]
     elif completed:
         deliverable_task = completed[-1]
+    if packaged:
+        filename, deliverable, summary = packaged
+    elif deliverable_task:
+        filename, deliverable, summary = DEFAULT_FILENAME, deliverable_task[1], None
+    else:
+        filename = deliverable = summary = None
     return {
         "status": status,
         "deliverable_task_id": (
-            deliverable_task[0].task_id if deliverable_task else None
+            deliverable_task[0].task_id if deliverable_task and not packaged else None
         ),
-        "deliverable": deliverable_task[1] if deliverable_task else None,
+        "deliverable": deliverable,
+        "filename": filename,
+        "summary": summary,
         "tasks": tasks,
         "total_cost_usd": ledger.total_cost(),
         "mean_grade": round(sum(grades) / len(grades), 2) if grades else None,

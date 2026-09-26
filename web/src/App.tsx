@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import type { ClientMsg } from "./contract";
 import { Director } from "./scene/director";
 import { MarketScene } from "./scene/Scene";
 import type { InteractId } from "./scene/world";
@@ -13,7 +12,7 @@ import { DebugPanel } from "./ui/DebugPanel";
 import { GameDialog } from "./ui/GameDialog";
 
 const params = new URLSearchParams(window.location.search);
-const SOURCE = params.get("source") === "ws" ? "ws" : "fixture";
+const SOURCE = params.get("source") === "fixture" ? "fixture" : "ws"; // live by default; ?source=fixture replays a recording
 const WS_URL = import.meta.env.VITE_WS_URL ?? "ws://localhost:8000/ws";
 const parsedSpeed = Number(params.get("speed") || "1");
 const SPEED = SOURCE === "fixture" && Number.isFinite(parsedSpeed) && parsedSpeed > 0 ? parsedSpeed : 1;
@@ -37,7 +36,6 @@ function modeBadge(state: MarketState): { label: string; tone: string } {
 
 export default function App() {
   const [state, setState] = useState(store.getState());
-  const [pending, setPending] = useState(false);
   const [dialog, setDialog] = useState<InteractId | null>(null);
   const [showLedger, setShowLedger] = useState(params.get("ledger") === "1");
   const [sceneReady, setSceneReady] = useState(false);
@@ -67,7 +65,7 @@ export default function App() {
       scene.onInteract = (id) => openDialog(id);
       scene.onGround = () => openDialog(null);
       directorRef.current = new Director(created, SPEED);
-      if (import.meta.env.DEV) (window as unknown as { __abyss: unknown }).__abyss = { scene: created };
+      if (import.meta.env.DEV) (window as unknown as { __abyss: unknown }).__abyss = { scene: created, store };
       scene.render(store.getState());
       unsubscribe = store.subscribe(() => scene?.render(store.getState()));
       setSceneReady(true);
@@ -86,10 +84,6 @@ export default function App() {
     const source = createSource();
     sourceRef.current = source;
     source.start((event) => {
-      // A job has actually started (or been rejected): the posted job is resolved.
-      if (event.type === "job_split" || event.type === "error" || event.type === "final") {
-        setPending(false);
-      }
       store.dispatch(event);
       directorRef.current?.onEvent(event);
     });
@@ -100,10 +94,6 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!state.connected) setPending(false);
-  }, [state.connected]);
-
-  useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") openDialog(null);
     };
@@ -111,12 +101,6 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [openDialog]);
 
-  const send = (message: ClientMsg) => {
-    const sent = sourceRef.current?.send?.(message);
-    if (sent === false) console.warn("Not connected; message dropped", message);
-    return sent !== false;
-  };
-  const collect = useCallback(() => store.collectResult(), []);
 
   const badge = modeBadge(state);
 
@@ -126,7 +110,7 @@ export default function App() {
         <header className="stage-header">
           <div className="title">
             <strong>ABYSS</strong>
-            <small>Click to walk. Talk to the Main Agent on the boat to give the market a job. Click a vendor to watch and steer it.</small>
+            <small>Live view. Give jobs and steer from the terminal: python -m abyss.chat. Click anyone here to zoom in and watch.</small>
           </div>
           <div className="header-actions">
             <button type="button" className="ledger-toggle" onClick={() => setShowLedger((v) => !v)}>
@@ -143,20 +127,7 @@ export default function App() {
             </div>
           )}
           {dialog && (
-            <GameDialog
-              key={dialog}
-              id={dialog}
-              state={state}
-              live={SOURCE === "ws"}
-              pending={pending}
-              onClose={() => openDialog(null)}
-              onPostJob={(job, priceWeight) => {
-                if (send({ type: "start_job", job, price_weight: priceWeight })) setPending(true);
-              }}
-              onReset={() => send({ type: "reset" })}
-              onCollect={collect}
-              onSteer={(target, note) => send({ type: "steer", target, note })}
-            />
+            <GameDialog key={dialog} id={dialog} state={state} onClose={() => openDialog(null)} />
           )}
         </div>
       </section>

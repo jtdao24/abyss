@@ -21,24 +21,7 @@ class EventStream:
         self._started: float | None = None
 
     async def hello(self, rep: ReputationStore) -> None:
-        await self.emit(
-            "hello",
-            {
-                "agents": [asdict(agent) for agent in config.AGENTS],
-                "reputation": rep.snapshot(),
-                "config": {
-                    "price_weight": config.PRICE_WEIGHT,
-                    "rep_init": config.REP_INIT,
-                    "rep_alpha": config.REP_ALPHA,
-                    "task_types": config.TASK_TYPES,
-                    "real_models": config.real_models(),
-                    "fake_llm": config.fake_llm(),
-                    "orchestrator_model": config.ORCHESTRATOR_MODEL,
-                    "reviewer_model": config.REVIEWER_MODEL,
-                },
-            },
-            job_id=None,
-        )
+        await self.emit("hello", hello_data(rep), job_id=None)
 
     def start_job(self, job_id: str) -> None:
         self.job_id = job_id
@@ -50,6 +33,10 @@ class EventStream:
         data: dict,
         job_id: str | None = ...,
     ) -> None:
+        await self.sink(self.stamp(type, data, job_id))
+
+    def stamp(self, type: str, data: dict, job_id: str | None = ...) -> dict:
+        """Build and validate the next event without sending it."""
         resolved_job_id = self.job_id if job_id is ... else job_id
         elapsed = 0
         if resolved_job_id is not None and self._started is not None:
@@ -63,8 +50,25 @@ class EventStream:
             "data": data,
         }
         validate_event(event)
-        await self.sink(event)
         self.seq += 1
+        return event
+
+
+def hello_data(rep: ReputationStore) -> dict:
+    return {
+        "agents": [asdict(agent) for agent in config.AGENTS],
+        "reputation": rep.snapshot(),
+        "config": {
+            "price_weight": config.PRICE_WEIGHT,
+            "rep_init": config.REP_INIT,
+            "rep_alpha": config.REP_ALPHA,
+            "task_types": config.TASK_TYPES,
+            "real_models": config.real_models(),
+            "fake_llm": config.fake_llm(),
+            "orchestrator_model": config.ORCHESTRATOR_MODEL,
+            "reviewer_model": config.REVIEWER_MODEL,
+        },
+    }
 
 
 def new_job_id() -> str:

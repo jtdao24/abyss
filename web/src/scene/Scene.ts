@@ -147,7 +147,6 @@ export class MarketScene {
   private spent!: Text;
   private finalBg!: Graphics;
   private finalText!: Text;
-  private marker!: Text;
   private readonly hover = new Graphics();
   private hoverLabel!: Text;
   private hovered: Interactable | "tasks" | null = null;
@@ -296,10 +295,6 @@ export class MarketScene {
     }
     bubbles.addChild(this.mainBubble, this.reviewBubble);
 
-    this.marker = text("!", 40, PALETTE.gold);
-    this.marker.style.stroke = { color: PALETTE.ink, width: 6 };
-    this.marker.visible = false;
-
     const hud = new Graphics().rect(0, 0, WORLD.w, 32).fill({ color: PALETTE.ink, alpha: 0.75 });
     this.banner = text("", 16);
     this.banner.anchor.set(0, 0.5);
@@ -315,7 +310,7 @@ export class MarketScene {
     this.hoverLabel.visible = false;
 
     const panel = this.buildTaskPanel();
-    this.world.addChild(bubbles, this.marker, hud, this.banner, this.spent, panel, this.finalBg, this.finalText, this.fx, this.hoverLabel);
+    this.world.addChild(bubbles, hud, this.banner, this.spent, panel, this.finalBg, this.finalText, this.fx, this.hoverLabel);
 
     this.world.eventMode = "static";
     this.world.hitArea = new Rectangle(0, 0, WORLD.w, WORLD.h);
@@ -401,9 +396,6 @@ export class MarketScene {
     this.mainBubble.position.set(this.mainAgent.x, this.mainAgent.y - HEAD);
     this.reviewBubble.position.set(this.reviewer.x, this.reviewer.y - HEAD - 2);
     for (const child of this.actors.children) child.zIndex = child.y;
-    if (this.marker.visible) {
-      this.marker.position.set(this.mainAgent.x + 44, this.mainAgent.y - 70 - Math.abs(Math.sin(this.clock / 260)) * 10);
-    }
     if (this.clickAge < 450) {
       this.clickAge += ticker.deltaMS;
       const p = Math.min(1, this.clickAge / 450);
@@ -456,7 +448,6 @@ export class MarketScene {
     }
 
     this.mainBubble.set(model.mainAgent);
-    this.marker.visible = model.resultReady;
 
     if (model.reviewing) this.reviewBubble.set("...", PALETTE.muted);
     else if (model.review) {

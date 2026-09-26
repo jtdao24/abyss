@@ -49,8 +49,8 @@ export interface MarketState {
   connected: boolean;
   config: HelloData["config"] | null;
   jobActive: boolean;
-  /** The player has picked up the finished job's result from the captain. */
-  resultCollected: boolean;
+  /** The main agent has packaged the current job's file (before `final` arrives). */
+  assembled: { filename: string; summary: string } | null;
   /** Every finished job this session, oldest first. */
   history: { jobId: string; jobText: string; final: FinalData }[];
   /** Steering notes the server acknowledged, for every job this session. */
@@ -68,14 +68,12 @@ export const initialState: MarketState = {
   connected: false,
   config: null,
   jobActive: false,
-  resultCollected: false,
+  assembled: null,
   history: [],
   steering: [],
 };
 
-export function collectResult(state: MarketState): MarketState {
-  return state.final ? { ...state, resultCollected: true } : state;
-}
+
 
 export function setConnected(state: MarketState, connected: boolean): MarketState {
   return { ...state, connected };
@@ -113,7 +111,7 @@ export function reduce(state: MarketState, ev: AbyssEvent): MarketState {
         stats: null,
         final: null,
         jobActive: true,
-        resultCollected: false,
+        assembled: null,
       };
     }
     case "task_posted":
@@ -213,6 +211,8 @@ export function reduce(state: MarketState, ev: AbyssEvent): MarketState {
           ? updateTask(state.tasks, ev.data.task_id, { status: "failed" })
           : state.tasks,
       };
+    case "assembled":
+      return { ...withLog, assembled: { filename: ev.data.filename, summary: ev.data.summary } };
     case "steered":
       return {
         ...withLog,
