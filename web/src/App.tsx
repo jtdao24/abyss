@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import type { ClientMsg } from "./contract";
+import { Director } from "./scene/director";
 import { MarketScene } from "./scene/Scene";
 import { FixtureSource } from "./sources/fixture";
 import type { EventSource } from "./sources/types";
@@ -14,15 +15,15 @@ import { JobBar } from "./ui/JobBar";
 const params = new URLSearchParams(window.location.search);
 const SOURCE = params.get("source") === "ws" ? "ws" : "fixture";
 const WS_URL = import.meta.env.VITE_WS_URL ?? "ws://localhost:8000/ws";
+const parsedSpeed = Number(params.get("speed") || "1");
+const SPEED = SOURCE === "fixture" && Number.isFinite(parsedSpeed) && parsedSpeed > 0 ? parsedSpeed : 1;
 
 function createSource(): EventSource {
   if (SOURCE === "ws") {
     return new WsSource(WS_URL, (connected) => store.setConnected(connected));
   }
   const file = params.get("file") || "fake_run";
-  const parsedSpeed = Number(params.get("speed") || "1");
-  const speed = Number.isFinite(parsedSpeed) && parsedSpeed > 0 ? parsedSpeed : 1;
-  return new FixtureSource(`/fixtures/${encodeURIComponent(file)}.json`, speed);
+  return new FixtureSource(`/fixtures/${encodeURIComponent(file)}.json`, SPEED);
 }
 
 function modeBadge(state: MarketState): { label: string; tone: string } {
@@ -40,6 +41,7 @@ export default function App() {
   const [dismissedJob, setDismissedJob] = useState<string | null>(null);
   const sourceRef = useRef<EventSource | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
+  const directorRef = useRef<Director | null>(null);
   const [sceneReady, setSceneReady] = useState(false);
 
   useEffect(() => {
@@ -53,6 +55,8 @@ export default function App() {
         return;
       }
       scene = created;
+      directorRef.current = new Director(created, SPEED);
+      if (import.meta.env.DEV) (window as unknown as { __abyss: unknown }).__abyss = { scene: created };
       scene.render(store.getState());
       unsubscribe = store.subscribe(() => scene?.render(store.getState()));
       setSceneReady(true);
@@ -60,6 +64,8 @@ export default function App() {
     return () => {
       cancelled = true;
       unsubscribe();
+      directorRef.current?.destroy();
+      directorRef.current = null;
       scene?.destroy();
     };
   }, []);
@@ -74,6 +80,7 @@ export default function App() {
         setPending(false);
       }
       store.dispatch(event);
+      directorRef.current?.onEvent(event);
     });
     return () => {
       source.stop();
