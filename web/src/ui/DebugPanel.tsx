@@ -13,7 +13,7 @@ export function DebugPanel({ state }: { state: MarketState }) {
       <header className="debug-header">
         <div>
           <span className={`connection-dot ${state.connected ? "online" : ""}`} />
-          {state.connected ? "REPLAY ONLINE" : "WAITING"}
+          {state.connected ? "ONLINE" : "WAITING"}
         </div>
         <strong>ABYSS LEDGER</strong>
       </header>

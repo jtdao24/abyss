@@ -4,6 +4,7 @@ import type {
   AgentSpec,
   BidData,
   FinalData,
+  HelloData,
   StatsData,
   TaskSpec,
   TaskType,
@@ -46,6 +47,8 @@ export interface MarketState {
   final: FinalData | null;
   log: AbyssEvent[];
   connected: boolean;
+  config: HelloData["config"] | null;
+  jobActive: boolean;
 }
 
 export const initialState: MarketState = {
@@ -57,7 +60,13 @@ export const initialState: MarketState = {
   final: null,
   log: [],
   connected: false,
+  config: null,
+  jobActive: false,
 };
+
+export function setConnected(state: MarketState, connected: boolean): MarketState {
+  return { ...state, connected };
+}
 
 export function reduce(state: MarketState, ev: AbyssEvent): MarketState {
   const withLog = { ...state, log: [...state.log, ev].slice(-200) };
@@ -71,7 +80,9 @@ export function reduce(state: MarketState, ev: AbyssEvent): MarketState {
           status: "idle",
         };
       }
-      return { ...withLog, agents, connected: true };
+      // A fresh hello means a fresh connection: the server cancels a connection's
+      // job when it drops, so nothing can still be running.
+      return { ...withLog, agents, connected: true, config: ev.data.config, jobActive: false };
     }
     case "job_split": {
       const tasks = Object.fromEntries(
@@ -88,6 +99,7 @@ export function reduce(state: MarketState, ev: AbyssEvent): MarketState {
         taskOrder: ev.data.tasks.map((task) => task.task_id),
         stats: null,
         final: null,
+        jobActive: true,
       };
     }
     case "task_posted":
@@ -172,11 +184,13 @@ export function reduce(state: MarketState, ev: AbyssEvent): MarketState {
         ...withLog,
         agents: mapAgentStatus(state.agents, () => "idle"),
         final: ev.data,
+        jobActive: false,
       };
     case "error":
       return {
         ...withLog,
         agents: mapAgentStatus(state.agents, () => "idle"),
+        jobActive: ev.data.fatal ? false : state.jobActive,
         tasks: ev.data.task_id
           ? updateTask(state.tasks, ev.data.task_id, { status: "failed" })
           : state.tasks,

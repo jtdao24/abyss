@@ -27,8 +27,11 @@ button, input, textarea { font: inherit; }
 .stage-shell {
   position: sticky;
   top: 0;
-  display: grid;
-  place-items: center;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: 12px;
   height: 100vh;
   padding: 20px;
   background: #07111c;
@@ -175,8 +178,85 @@ th { color: #7fb7b6; }
 .event-log span, .event-log em { color: #6f919f; font-style: normal; }
 .event-log b { color: #d6e8e7; }
 
+.stage-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #f6d783;
+  font-size: 14px;
+}
+.mode-badge { padding: 4px 8px; font-size: 10px; color: #091521; background: #8eaab7; }
+.mode-badge.live { background: #77d982; }
+.mode-badge.test { background: #f0cb68; }
+.mode-badge.fake { background: #85cfcc; }
+.mode-badge.offline { color: #fff; background: #a33; }
+
+.job-bar {
+  display: grid;
+  grid-template-columns: 1fr 170px auto;
+  gap: 10px;
+  align-items: center;
+}
+.job-bar textarea {
+  resize: none;
+  padding: 8px;
+  color: #ecf4e8;
+  background: #0b1c28;
+  border: 2px solid #294a5d;
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+}
+.price-weight { display: grid; gap: 4px; font-size: 9px; color: #b9ccd3; }
+.job-actions { display: grid; gap: 6px; }
+.job-actions button, .deliverable-card header button {
+  padding: 6px 12px;
+  color: #17200e;
+  background: #f0cb68;
+  border: 0;
+  box-shadow: 3px 3px #081621;
+  cursor: pointer;
+  font-size: 10px;
+}
+.job-actions button:disabled { color: #56707c; background: #1c3547; cursor: default; }
+
+.deliverable-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: #07111ccc;
+}
+.deliverable-card {
+  width: min(560px, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  padding: 14px;
+  background: #102333;
+  border: 3px solid #d9c17f;
+  box-shadow: 5px 5px #081621;
+}
+.deliverable-card header, .deliverable-card footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: #f6d783;
+  font-size: 11px;
+}
+.deliverable-text {
+  white-space: pre-wrap;
+  color: #d6e8e7;
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.deliverable-card footer { margin-top: 10px; font-size: 9px; }
+
 @media (max-width: 900px) {
   .app-shell { display: block; }
-  .stage-shell { position: relative; height: auto; min-height: 55vw; }
+  .stage-shell { position: relative; height: auto; min-height: 55vw; padding: 16px; }
+  .job-bar { grid-template-columns: 1fr; }
   .debug-panel { height: auto; border-left: 0; border-top: 4px solid #223e4f; }
 }
