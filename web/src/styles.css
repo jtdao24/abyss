@@ -39,7 +39,7 @@ button, input, textarea { font: inherit; }
 #stage {
   position: relative;
   width: 100%;
-  aspect-ratio: 16 / 9;
+  aspect-ratio: 2816 / 1536;
   max-height: calc(100vh - 40px);
   border: 4px solid #d9c17f;
   box-shadow: 0 0 0 5px #162a38, 0 16px 50px #000a;
@@ -49,7 +49,7 @@ button, input, textarea { font: inherit; }
   overflow: hidden;
   background: #07111c;
 }
-.market-canvas { display: block; image-rendering: pixelated; }
+.market-canvas { display: block; }
 
 .stage-placeholder {
   position: absolute;
@@ -180,6 +180,16 @@ th { color: #7fb7b6; }
 .event-log span, .event-log em { color: #6f919f; font-style: normal; }
 .event-log b { color: #d6e8e7; }
 
+.app-shell.ledger-hidden { grid-template-columns: 1fr; }
+.header-actions { display: flex; align-items: center; gap: 10px; }
+.ledger-toggle {
+  padding: 4px 8px;
+  color: #d6e8e7;
+  background: #142d3f;
+  border: 2px solid #294a5d;
+  cursor: pointer;
+  font-size: 10px;
+}
 .stage-header {
   display: flex;
   align-items: center;

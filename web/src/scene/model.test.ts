@@ -36,6 +36,14 @@ describe("sceneModel", () => {
     expect(model.cards.map((c) => c.glyph)).toEqual(["6", "~", ""]);
   });
 
+  it("shows the reviewer at work between done and graded", () => {
+    const state = stateAfter((ev) => ev.type === "done" && ev.data.task_id === "t1");
+    const model = sceneModel(state);
+    expect(model.reviewing).toBe(true);
+    expect(model.review).toBeNull();
+    expect(model.captain).toBe("3 TASKS POSTED");
+  });
+
   it("marks an overpromise as a bad review", () => {
     const state = stateAfter((ev) => ev.type === "graded" && ev.data.task_id === "t1");
     expect(sceneModel(state).review).toEqual({ text: "T1 6/10", tone: "bad" });
@@ -47,6 +55,8 @@ describe("sceneModel", () => {
     expect(model.finalBanner).toBe("JOB OK - GRADE 8 - $0.0693");
     expect(model.spent).toBe("SPENT $0.0693");
     expect(model.review).toEqual({ text: "T3 9/10", tone: "ok" });
+    expect(model.reviewing).toBe(false);
+    expect(model.captain).toBe("JOB DONE!");
   });
 
   it("renders an empty market before any job", () => {
@@ -54,5 +64,6 @@ describe("sceneModel", () => {
     expect(model.stalls).toHaveLength(3);
     expect(model.cards).toEqual([]);
     expect(model.banner).toBe("WAITING FOR A JOB");
+    expect(model.captain).toBe("MAIN AGENT");
   });
 });

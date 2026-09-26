@@ -1,14 +1,24 @@
-// Event-driven decoration on top of the state-driven scene. Every effect lives
-// on scene.fx and removes itself; skipping all of them never changes what
-// MarketScene.render(state) shows.
-import { Container, Graphics, Text, type Ticker } from "pixi.js";
+// Event-driven motion on top of the state-driven scene: a courier carries each
+// task crate hub → winning stall → Task Delivery, plus pops, coins and floating
+// numbers. Skipping all of it never changes what MarketScene.render(state) shows.
+import { Container, Graphics, type Text, type Ticker } from "pixi.js";
 
-import type { AbyssEvent, AgentId } from "../contract";
-import { COLORS } from "./sprites";
-import { BOARD_POS, LIGHTHOUSE_X, STALL_X, TILL_POS, WIDTH, type MarketScene } from "./Scene";
+import type { AbyssEvent } from "../contract";
+import {
+  COURIER_HOME,
+  DELIVERY_SPOT,
+  HUB_SPOT,
+  OFFICER,
+  PALETTE,
+  SPENT_POS,
+  STALLS,
+  WORLD,
+  text,
+  type MarketScene,
+} from "./Scene";
 
-const MAX_ACTIVE = 40; // backlog guard: beyond this, finish everything instantly
-const SPARK_EVERY_MS = 220;
+const MAX_ACTIVE = 60; // backlog guard: beyond this, finish every effect instantly
+const COURIER_SPEED = 520; // world px per second at speed 1
 
 interface Tween {
   elapsed: number;
@@ -17,19 +27,14 @@ interface Tween {
   update(progress: number): void;
 }
 
-const ease = (p: number) => 1 - (1 - p) * (1 - p);
+type Point = { x: number; y: number };
 
-function label(value: string, fill: string, size = 8): Text {
-  const t = new Text({ text: value, style: { fontFamily: ["Silkscreen", "monospace"], fontSize: size, fill } });
-  t.anchor.set(0.5);
-  t.roundPixels = true;
-  return t;
-}
+const ease = (p: number) => 1 - (1 - p) * (1 - p);
 
 export class Director {
   private readonly tweens: Tween[] = [];
-  private readonly working = new Set<AgentId>();
-  private sparkClock = 0;
+  private readonly route: Point[] = [];
+  private walkClock = 0;
 
   constructor(
     private readonly scene: MarketScene,
@@ -46,127 +51,131 @@ export class Director {
   onEvent(ev: AbyssEvent): void {
     switch (ev.type) {
       case "job_split":
-        this.working.clear();
-        this.floatText("NEW JOB", COLORS.gold, BOARD_POS.x + 43, BOARD_POS.y - 4, 900, 12);
+        this.floatText("NEW JOB!", PALETTE.gold, HUB_SPOT.x, 400, 1100, 44);
         break;
       case "task_posted":
-        this.flyCard(ev.data.index);
+        this.floatText(`TASK ${ev.data.index + 1}/${ev.data.total}`, PALETTE.paper, HUB_SPOT.x, 640, 1000, 32);
+        this.walk([HUB_SPOT]);
         break;
       case "bid":
-        if (ev.data.ok) this.burst(STALL_X[ev.data.agent_id], 32, COLORS.cream, 14);
+        if (ev.data.ok) this.burst(STALLS[ev.data.agent_id].front.x, STALLS[ev.data.agent_id].front.y, PALETTE.paper, 70);
         break;
-      case "won":
-        this.burst(STALL_X[ev.data.agent_id], 70, COLORS.gold, 22);
-        this.floatText("SOLD!", COLORS.gold, STALL_X[ev.data.agent_id], 96, 1200, 12);
+      case "won": {
+        const stall = STALLS[ev.data.agent_id];
+        this.burst(stall.front.x, 900, PALETTE.gold, 150);
+        this.floatText("SOLD!", PALETTE.gold, stall.front.x, 860, 1300, 56);
+        this.walk([HUB_SPOT, { x: stall.front.x, y: stall.front.y + 70 }]);
         break;
-      case "working":
-        this.working.add(ev.data.agent_id);
-        break;
+      }
       case "done": {
-        this.working.delete(ev.data.agent_id);
+        const stall = STALLS[ev.data.agent_id];
         const coins = Math.max(1, Math.min(20, Math.round(ev.data.usage.cost_usd * 1000)));
-        for (let i = 0; i < coins; i += 1) this.coin(STALL_X[ev.data.agent_id], 130, i * 60);
+        for (let i = 0; i < coins; i += 1) this.coin(stall.front.x, 900, i * 70);
+        this.walk([{ x: stall.front.x, y: stall.front.y + 70 }, DELIVERY_SPOT]);
         break;
       }
       case "graded": {
         const promised = ev.data.promised_quality;
-        const tone =
-          promised === null || ev.data.grade >= promised ? COLORS.good
-            : ev.data.grade < promised - 1 ? COLORS.bad : COLORS.ok;
-        this.beam(STALL_X[ev.data.agent_id]);
-        this.floatText(`${ev.data.grade}/10`, tone, STALL_X[ev.data.agent_id], 95, 1500, 16);
+        const tone = promised === null || ev.data.grade >= promised ? PALETTE.good
+          : ev.data.grade < promised - 1 ? PALETTE.bad : PALETTE.ok;
+        this.floatText(`${ev.data.grade}/10`, tone, OFFICER.x, 960, 1500, 60);
+        this.walk([COURIER_HOME]);
         break;
       }
       case "rep_update": {
         const delta = ev.data.new - ev.data.old;
         if (Math.abs(delta) < 0.0005) break;
-        const text = `${delta > 0 ? "+" : ""}${delta.toFixed(3)} ${ev.data.task_type.slice(0, 1).toUpperCase()}`;
-        this.floatText(text, delta > 0 ? COLORS.good : COLORS.bad, STALL_X[ev.data.agent_id] + 3, 120, 1400);
+        const [x0, , x1] = STALLS[ev.data.agent_id].label;
+        const label = `${delta > 0 ? "+" : ""}${delta.toFixed(3)} ${ev.data.task_type.toUpperCase()}`;
+        this.floatText(label, delta > 0 ? PALETTE.good : PALETTE.bad, (x0 + x1) / 2, 900, 1600, 30);
         break;
       }
       case "final":
-        this.working.clear();
-        this.floatText(ev.data.status === "ok" ? "JOB DONE" : `JOB ${ev.data.status.toUpperCase()}`,
-          COLORS.gold, WIDTH / 2, 110, 2000, 24);
+        this.floatText(ev.data.status === "ok" ? "JOB DONE!" : `JOB ${ev.data.status.toUpperCase()}`,
+          PALETTE.gold, WORLD.w / 2, WORLD.h / 2 - 120, 2200, 96);
+        this.walk([COURIER_HOME]);
         break;
       case "error":
-        if (ev.data.fatal) this.working.clear();
+        if (ev.data.fatal) this.walk([COURIER_HOME]);
         break;
       default:
         break;
     }
   }
 
+  // ---------------------------------------------------------------- courier
+  private walk(points: Point[]): void {
+    this.route.push(...points);
+    // Far behind (fast replay or a burst of events): skip to the latest stop.
+    if (this.route.length > 6) {
+      const last = this.route[this.route.length - 1];
+      this.route.length = 0;
+      this.scene.courier.position.set(last.x, last.y);
+    }
+  }
+
+  private stepCourier(deltaMs: number): void {
+    const courier = this.scene.courier;
+    const target = this.route[0];
+    if (!target) {
+      courier.rotation = 0;
+      return;
+    }
+    const dx = target.x - courier.x;
+    const dy = target.y - courier.y;
+    const dist = Math.hypot(dx, dy);
+    const step = (COURIER_SPEED * this.speed * deltaMs) / 1000;
+    if (dist <= step) {
+      courier.position.set(target.x, target.y);
+      this.route.shift();
+      return;
+    }
+    courier.x += (dx / dist) * step;
+    courier.y += (dy / dist) * step;
+    // The sprite faces left; mirror it when walking right. Waddle while moving.
+    courier.scale.x = dx > 0 ? -1 : 1;
+    this.walkClock += deltaMs;
+    courier.rotation = Math.sin(this.walkClock / 90) * 0.06;
+  }
+
   // ---------------------------------------------------------------- effects
   private add(node: Container, durationMs: number, update: (p: number) => void, delayMs = 0): void {
-    const duration = durationMs / this.speed;
-    const tween: Tween = { elapsed: -delayMs / this.speed, duration, node, update };
+    const tween: Tween = { elapsed: -delayMs / this.speed, duration: durationMs / this.speed, node, update };
     node.visible = delayMs <= 0;
     this.scene.fx.addChild(node);
     this.tweens.push(tween);
     if (this.tweens.length > MAX_ACTIVE) this.finishAll();
   }
 
-  private floatText(value: string, fill: string, x: number, y: number, ms: number, size = 8): void {
-    const t = label(value, fill, size);
+  private floatText(value: string, fill: string, x: number, y: number, ms: number, size: number): void {
+    const t: Text = text(value, size, fill);
+    t.style.stroke = { color: PALETTE.ink, width: Math.max(4, size / 7) };
     t.position.set(x, y);
     this.add(t, ms, (p) => {
-      t.y = Math.round(y - 14 * ease(p));
+      t.y = y - 50 * ease(p);
       t.alpha = p < 0.7 ? 1 : 1 - (p - 0.7) / 0.3;
     });
   }
 
-  private flyCard(index: number): void {
-    const card = new Graphics().rect(0, 0, 22, 14).fill(COLORS.cream).rect(2, 3, 14, 1).rect(2, 6, 18, 1)
-      .rect(2, 9, 10, 1).fill(COLORS.dim);
-    const from = { x: BOARD_POS.x + 43, y: BOARD_POS.y + 16 + index * 14 };
-    const to = { x: STALL_X.sonnet - 11, y: 168 };
-    this.add(card, 900, (p) => {
-      const e = ease(p);
-      card.x = Math.round(from.x + (to.x - from.x) * e);
-      card.y = Math.round(from.y + (to.y - from.y) * e - 30 * Math.sin(Math.PI * e));
-      card.alpha = p < 0.8 ? 1 : 1 - (p - 0.8) / 0.2;
-    });
-  }
-
   private burst(x: number, y: number, color: string, radius: number): void {
-    for (let i = 0; i < 8; i += 1) {
-      const angle = (Math.PI * 2 * i) / 8;
-      const spark = new Graphics().rect(0, 0, 2, 2).fill(color);
-      this.add(spark, 600, (p) => {
-        spark.x = Math.round(x + Math.cos(angle) * radius * ease(p));
-        spark.y = Math.round(y + Math.sin(angle) * radius * 0.6 * ease(p));
+    for (let i = 0; i < 10; i += 1) {
+      const angle = (Math.PI * 2 * i) / 10;
+      const spark = new Graphics().rect(-5, -5, 10, 10).fill(color);
+      this.add(spark, 650, (p) => {
+        spark.x = x + Math.cos(angle) * radius * ease(p);
+        spark.y = y + Math.sin(angle) * radius * 0.6 * ease(p);
         spark.alpha = 1 - p;
       });
     }
   }
 
   private coin(x: number, y: number, delayMs: number): void {
-    const coin = new Graphics().rect(0, 0, 3, 3).fill(COLORS.gold).rect(1, 1, 1, 1).fill("#b8860b");
-    const to = { x: TILL_POS.x + 11, y: TILL_POS.y + 2 };
-    this.add(coin, 700, (p) => {
-      coin.x = Math.round(x + (to.x - x) * p);
-      coin.y = Math.round(y + (to.y - y) * p - 40 * Math.sin(Math.PI * p));
+    const coin = new Graphics().circle(0, 0, 12).fill(PALETTE.ink).circle(0, 0, 9).fill(PALETTE.gold);
+    const to = { x: SPENT_POS.x - 120, y: SPENT_POS.y };
+    this.add(coin, 900, (p) => {
+      coin.x = x + (to.x - x) * p;
+      coin.y = y + (to.y - y) * p - 200 * Math.sin(Math.PI * p);
     }, delayMs);
-  }
-
-  private beam(stallX: number): void {
-    const beam = new Graphics()
-      .moveTo(LIGHTHOUSE_X, 33).lineTo(stallX - 6, 108).lineTo(stallX + 6, 108).lineTo(LIGHTHOUSE_X, 33)
-      .fill({ color: "#fff3b0", alpha: 0.35 });
-    this.add(beam, 900, (p) => {
-      beam.alpha = p < 0.3 ? p / 0.3 : 1 - (p - 0.3) / 0.7;
-    });
-  }
-
-  private spark(agentId: AgentId): void {
-    const x = STALL_X[agentId] + (Math.random() * 24 - 12);
-    const s = new Graphics().rect(0, 0, 1, 1).fill(COLORS.gold);
-    this.add(s, 500, (p) => {
-      s.x = Math.round(x);
-      s.y = Math.round(104 - 16 * p);
-      s.alpha = 1 - p;
-    });
   }
 
   // ---------------------------------------------------------------- loop
@@ -175,11 +184,7 @@ export class Director {
   }
 
   private readonly tick = (ticker: Ticker): void => {
-    this.sparkClock += ticker.deltaMS;
-    if (this.sparkClock >= SPARK_EVERY_MS / this.speed) {
-      this.sparkClock = 0;
-      for (const agentId of this.working) this.spark(agentId);
-    }
+    this.stepCourier(ticker.deltaMS);
     for (let i = this.tweens.length - 1; i >= 0; i -= 1) {
       const tween = this.tweens[i];
       tween.elapsed += ticker.deltaMS;

@@ -36,6 +36,10 @@ export interface SceneModel {
   banner: string;
   spent: string;
   review: { text: string; tone: ReviewTone } | null;
+  /** The reviewer is grading the current task right now. */
+  reviewing: boolean;
+  /** What the main agent (orchestrator) says. */
+  captain: string;
   finalBanner: string | null;
 }
 
@@ -134,5 +138,22 @@ export function sceneModel(state: MarketState): SceneModel {
     ? `JOB ${state.final.status.toUpperCase()} - GRADE ${state.final.mean_grade ?? "-"} - $${state.final.total_cost_usd.toFixed(4)}`
     : null;
 
-  return { stalls, cards, banner, spent: `SPENT $${total.toFixed(4)}`, review, finalBanner };
+  const captain = state.final
+    ? "JOB DONE!"
+    : state.taskOrder.length > 0
+      ? `${state.taskOrder.length} TASKS POSTED`
+      : state.currentJob || state.jobActive
+        ? "SPLITTING JOB..."
+        : "MAIN AGENT";
+
+  return {
+    stalls,
+    cards,
+    banner,
+    spent: `SPENT $${total.toFixed(4)}`,
+    review,
+    reviewing: task?.status === "done",
+    captain,
+    finalBanner,
+  };
 }

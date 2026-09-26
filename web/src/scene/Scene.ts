@@ -1,104 +1,97 @@
-// The seaside market. Fully state-driven: render(state) alone produces the
-// correct picture. Animations (director.ts) are decoration layered on top.
-import {
-  Application,
-  Container,
-  Graphics,
-  Sprite,
-  Text,
-  TextureStyle,
-  type Texture,
-} from "pixi.js";
+// The seaside market, built on the painted backdrop (art/market_reference.png,
+// cleaned by art/prepare_scene.py). Everything live is an overlay in the art's
+// own pixel coordinates. Fully state-driven: render(state) alone produces the
+// correct picture; director.ts adds motion on top.
+import { Application, Assets, Container, Graphics, Sprite, Text, type Texture } from "pixi.js";
 
 import type { AgentId, TaskType } from "../contract";
 import type { MarketState } from "../state/reducer";
-import {
-  AGENT_ORDER,
-  MAX_CARDS,
-  TASK_TYPES,
-  sceneModel,
-  type BubbleTone,
-  type SceneModel,
-  type StallModel,
-} from "./model";
-import {
-  COLORS,
-  HARBOR_MASTER,
-  HARBOR_PALETTE,
-  KEEPER,
-  TILL,
-  TILL_PALETTE,
-  keeperPalette,
-  pixelTexture,
-} from "./sprites";
+import { AGENT_ORDER, MAX_CARDS, TASK_TYPES, sceneModel, type BubbleTone, type SceneModel, type StallModel } from "./model";
 
-export const WIDTH = 480;
-export const HEIGHT = 270;
-const HORIZON = 100;
-const DECK_TOP = 150;
-const DECK_BOTTOM = 205;
-const EDGE = 212;
-const FONT = "Silkscreen";
+export const WORLD = { w: 2816, h: 1536 };
+const FONT = ["Silkscreen", "monospace"];
 
-export const STALL_X: Record<AgentId, number> = { haiku: 155, sonnet: 250, opus: 345 };
-export const LIGHTHOUSE_X = 444;
-export const TILL_POS = { x: 100, y: 175 };
-export const BOARD_POS = { x: 6, y: 44 };
+export const PALETTE = {
+  ink: "#1b1b2f",
+  paper: "#fffdf6",
+  cream: "#f3e6c8",
+  gold: "#f0cb68",
+  good: "#3fb950",
+  ok: "#e0a82e",
+  bad: "#e0473c",
+  muted: "#9aa3ad",
+  research: "#4aa8e0",
+  writing: "#e8a33d",
+  checking: "#d0508a",
+} as const;
 
-const HAIR: Record<AgentId, string> = { haiku: "#2d2d2d", sonnet: "#8b4513", opus: "#e8e8e8" };
-// Frozen in SPEC §1.1; used for keeper shirts so sprites are baked once.
-const SHIRT: Record<AgentId, string> = { haiku: "#4fb3a9", sonnet: "#e8a33d", opus: "#8e6cc9" };
-const BUBBLE_FILL: Record<BubbleTone, string> = {
-  thinking: COLORS.cream,
-  bid: COLORS.cream,
-  pass: "#9aa3ad",
-  won: COLORS.gold,
-  working: "#a9dcf5",
-  done: "#b8ecb0",
+/** Where each agent's stall is in the art. Label boxes are the painted "Vendor" signs we cover. */
+export const STALLS: Record<AgentId, { label: [number, number, number, number]; front: { x: number; y: number } }> = {
+  opus: { label: [479, 932, 824, 979], front: { x: 651, y: 1040 } },
+  sonnet: { label: [986, 932, 1338, 979], front: { x: 1162, y: 1040 } },
+  haiku: { label: [1666, 932, 1964, 979], front: { x: 1815, y: 1040 } },
 };
+const CLOSED_LABEL: [number, number, number, number] = [2102, 932, 2410, 979];
+export const BOARD = { x: 1400, y: 440, w: 305, h: 160 };
+export const HUB_SPOT = { x: 1552, y: 690 };
+export const DELIVERY_SPOT = { x: 1800, y: 1238 };
+export const COURIER_HOME = { x: 1694, y: 1049 };
+export const OFFICER = { x: 1940, y: 1220 };
+export const SPENT_POS = { x: WORLD.w - 40, y: 44 };
+const MAIN_BUBBLE: [number, number, number, number] = [424, 699, 664, 766];
+const GRADE_BUBBLE = { x: 1941, y: 1090 };
+
 const TYPE_COLOR: Record<TaskType, string> = {
-  research: COLORS.research,
-  writing: COLORS.writing,
-  checking: COLORS.checking,
+  research: PALETTE.research,
+  writing: PALETTE.writing,
+  checking: PALETTE.checking,
+};
+const BUBBLE_TEXT_COLOR: Record<BubbleTone, string> = {
+  thinking: PALETTE.muted,
+  bid: PALETTE.ink,
+  pass: PALETTE.muted,
+  won: "#8a5a00",
+  working: "#1f5f8b",
+  done: "#1d6b2a",
 };
 const CARD_FILL: Record<string, string> = {
-  pending: "#3a2c1c",
-  open: COLORS.cream,
-  assigned: COLORS.cream,
-  working: COLORS.cream,
-  done: "#d9f2d0",
-  graded: "#d9f2d0",
-  failed: "#f2c6c6",
+  pending: "#8a6a44",
+  open: PALETTE.paper,
+  assigned: PALETTE.paper,
+  working: PALETTE.paper,
+  done: "#dff3d8",
+  graded: "#dff3d8",
+  failed: "#f6d0cc",
 };
-const REVIEW_COLOR = { good: COLORS.good, ok: COLORS.ok, bad: COLORS.bad };
 
-function text(value: string, fill: string = COLORS.text): Text {
-  const t = new Text({ text: value, style: { fontFamily: [FONT, "monospace"], fontSize: 8, fill } });
-  t.roundPixels = true;
+export function text(value: string, size: number, fill: string = PALETTE.paper): Text {
+  const t = new Text({ text: value, style: { fontFamily: FONT, fontSize: size, fill } });
+  t.anchor.set(0.5);
   return t;
 }
 
-function box(g: Graphics, x: number, y: number, w: number, h: number, fill: string, border?: string): void {
-  if (border) {
-    g.rect(x, y, w, h).fill(border);
-    g.rect(x + 1, y + 1, w - 2, h - 2).fill(fill);
-  } else {
-    g.rect(x, y, w, h).fill(fill);
+/** White pixel-style speech bubble centred at (cx, cy), tail pointing `tail`. */
+function bubble(g: Graphics, cx: number, cy: number, w: number, h: number, tail: "up" | "down" | null, fill: string = PALETTE.paper): void {
+  const x = Math.round(cx - w / 2);
+  const y = Math.round(cy - h / 2);
+  g.roundRect(x - 4, y - 4, w + 8, h + 8, 10).fill(PALETTE.ink);
+  g.roundRect(x, y, w, h, 7).fill(fill);
+  if (tail === "down") {
+    g.poly([cx - 14, y + h, cx + 14, y + h, cx, y + h + 20]).fill(PALETTE.ink);
+    g.poly([cx - 8, y + h - 2, cx + 8, y + h - 2, cx, y + h + 11]).fill(fill);
+  } else if (tail === "up") {
+    g.poly([cx - 14, y, cx + 14, y, cx, y - 20]).fill(PALETTE.ink);
+    g.poly([cx - 8, y + 2, cx + 8, y + 2, cx, y - 11]).fill(fill);
   }
 }
 
 interface StallView {
-  agentId: AgentId;
-  cx: number;
-  frame: Graphics;
-  counter: Graphics;
-  sign: Graphics;
+  plate: Graphics;
   name: Text;
-  flag: Graphics;
+  role: Text;
+  reps: Graphics;
   bubbleBg: Graphics;
   bubbleText: Text;
-  reps: Graphics;
-  keeper: Sprite;
 }
 
 interface CardView {
@@ -109,23 +102,23 @@ interface CardView {
 
 export class MarketScene {
   readonly app: Application;
-  /** Layer for director.ts animations, drawn above everything else. */
+  /** World-space layer for director.ts effects, above all overlays. */
   readonly fx = new Container();
+  readonly world = new Container();
+  courier!: Sprite;
   private readonly el: HTMLElement;
   private readonly stalls = new Map<AgentId, StallView>();
   private readonly cards: CardView[] = [];
-  private readonly textures: Texture[] = [];
   private banner!: Text;
   private spent!: Text;
-  private reviewBg!: Graphics;
-  private reviewText!: Text;
+  private captainBg!: Graphics;
+  private captainText!: Text;
+  private gradeBg!: Graphics;
+  private gradeText!: Text;
   private finalBg!: Graphics;
   private finalText!: Text;
-  private shimmerA!: Graphics;
-  private shimmerB!: Graphics;
   private resizeObserver: ResizeObserver | null = null;
   private lastModel = "";
-  private scale = 1;
 
   private constructor(el: HTMLElement, app: Application) {
     this.el = el;
@@ -133,32 +126,27 @@ export class MarketScene {
   }
 
   static async create(el: HTMLElement): Promise<MarketScene> {
-    TextureStyle.defaultOptions.scaleMode = "nearest";
-    // The font stylesheet is a <link> in index.html, so the face is declared by
-    // now; load() fetches it. Pixi Text needs it before first render.
-    await document.fonts.load(`8px "${FONT}"`).catch(() => undefined);
+    await document.fonts.load('16px "Silkscreen"').catch(() => undefined);
     const app = new Application();
     await app.init({
-      width: WIDTH,
-      height: HEIGHT,
-      background: COLORS.skyTop,
-      antialias: false,
-      resolution: 1,
-      roundPixels: true,
+      resizeTo: el,
+      backgroundAlpha: 0,
+      antialias: true,
+      resolution: Math.min(2, window.devicePixelRatio || 1),
+      autoDensity: true,
     });
+    const [backdrop, courier] = await Promise.all([
+      Assets.load<Texture>("/art/market.png"),
+      Assets.load<Texture>("/art/courier.png"),
+    ]);
     const scene = new MarketScene(el, app);
-    scene.build();
+    scene.build(backdrop, courier);
     el.appendChild(app.canvas);
     app.canvas.classList.add("market-canvas");
     scene.resizeObserver = new ResizeObserver(() => scene.fit());
     scene.resizeObserver.observe(el);
     scene.fit();
     return scene;
-  }
-
-  /** Logical (480x270) → CSS pixel scale currently applied to the canvas. */
-  get pixelScale(): number {
-    return this.scale;
   }
 
   render(state: MarketState): void {
@@ -172,278 +160,211 @@ export class MarketScene {
   destroy(): void {
     this.resizeObserver?.disconnect();
     this.app.destroy(true, { children: true });
-    for (const texture of this.textures) texture.destroy(true);
   }
 
   private fit(): void {
     const { clientWidth: w, clientHeight: h } = this.el;
     if (!w || !h) return;
-    const exact = Math.min(w / WIDTH, h / HEIGHT);
-    // Integer scaling keeps pixels uniform; below 2x that wastes too much of
-    // the stage, so fill it and accept slightly uneven pixels.
-    this.scale = exact >= 2 ? Math.floor(exact) : exact;
-    this.app.canvas.style.width = `${Math.round(WIDTH * this.scale)}px`;
-    this.app.canvas.style.height = `${Math.round(HEIGHT * this.scale)}px`;
+    this.app.renderer.resize(w, h);
+    const scale = Math.min(w / WORLD.w, h / WORLD.h);
+    this.world.scale.set(scale);
+    this.world.position.set(Math.round((w - WORLD.w * scale) / 2), Math.round((h - WORLD.h * scale) / 2));
   }
 
-  // ------------------------------------------------------------ static world
-  private build(): void {
-    const stage = this.app.stage;
-    stage.addChild(this.buildBackdrop());
-    stage.addChild(this.buildBoard());
-    stage.addChild(this.buildLighthouse());
-    for (const agentId of AGENT_ORDER) stage.addChild(this.buildStall(agentId));
+  // ------------------------------------------------------------ build once
+  private build(backdrop: Texture, courier: Texture): void {
+    this.app.stage.addChild(this.world);
+    this.world.addChild(new Sprite(backdrop));
 
-    const master = new Sprite(this.texture(HARBOR_MASTER, HARBOR_PALETTE));
-    master.scale.set(2);
-    master.position.set(94, DECK_TOP - 20);
-    const till = new Sprite(this.texture(TILL, TILL_PALETTE));
-    till.scale.set(2);
-    till.position.set(TILL_POS.x, TILL_POS.y);
-    stage.addChild(master, till);
+    this.courier = new Sprite(courier);
+    this.courier.anchor.set(0.5);
+    this.courier.position.set(COURIER_HOME.x, COURIER_HOME.y);
+    this.world.addChild(this.courier);
 
-    const hud = new Graphics();
-    hud.rect(0, 0, WIDTH, 14).fill({ color: COLORS.ink, alpha: 0.75 });
-    this.banner = text("");
-    this.banner.position.set(4, 2);
-    this.spent = text("", COLORS.gold);
-    this.spent.anchor.set(1, 0);
-    this.spent.position.set(WIDTH - 4, 2);
+    this.buildBoard();
+    for (const agentId of AGENT_ORDER) this.buildStall(agentId);
+    this.buildClosedStall();
+
+    this.captainBg = new Graphics();
+    this.captainText = text("", 26, PALETTE.ink);
+    this.captainText.position.set((MAIN_BUBBLE[0] + MAIN_BUBBLE[2]) / 2, (MAIN_BUBBLE[1] + MAIN_BUBBLE[3]) / 2);
+    this.gradeBg = new Graphics();
+    this.gradeText = text("", 30, PALETTE.ink);
+    this.gradeText.position.set(GRADE_BUBBLE.x + 26, GRADE_BUBBLE.y);
+
+    const hud = new Graphics().rect(0, 0, WORLD.w, 88).fill({ color: PALETTE.ink, alpha: 0.72 });
+    this.banner = text("", 38);
+    this.banner.anchor.set(0, 0.5);
+    this.banner.position.set(40, 44);
+    this.spent = text("", 38, PALETTE.gold);
+    this.spent.anchor.set(1, 0.5);
+    this.spent.position.set(SPENT_POS.x, SPENT_POS.y);
     this.finalBg = new Graphics();
-    this.finalText = text("", COLORS.ink);
-    this.finalText.anchor.set(0.5, 0);
-    this.finalText.position.set(WIDTH / 2, 18);
-    stage.addChild(hud, this.banner, this.spent, this.finalBg, this.finalText, this.fx);
+    this.finalText = text("", 48, PALETTE.ink);
+    this.finalText.position.set(WORLD.w / 2, 150);
 
-    this.app.ticker.add(this.shimmer);
+    this.world.addChild(
+      this.captainBg, this.captainText, this.gradeBg, this.gradeText,
+      hud, this.banner, this.spent, this.finalBg, this.finalText, this.fx,
+    );
   }
 
-  private texture(rows: string[], palette: Record<string, string>): Texture {
-    const t = pixelTexture(this.app.renderer, rows, palette);
-    this.textures.push(t);
-    return t;
-  }
-
-  private buildBackdrop(): Container {
-    const layer = new Container();
-    const g = new Graphics();
-    const bands = [COLORS.skyTop, COLORS.skyMid, COLORS.skyLow, COLORS.horizon];
-    const bandH = HORIZON / bands.length;
-    bands.forEach((c, i) => g.rect(0, Math.round(i * bandH), WIDTH, Math.ceil(bandH)).fill(c));
-    g.rect(226, HORIZON - 12, 48, 12).fill(COLORS.sun);
-    g.rect(232, HORIZON - 16, 36, 4).fill(COLORS.sun);
-    g.rect(240, HORIZON - 18, 20, 2).fill(COLORS.sun);
-    g.rect(0, HORIZON, WIDTH, DECK_TOP - HORIZON).fill(COLORS.seaBack);
-    // deck planks
-    for (let y = DECK_TOP, row = 0; y < DECK_BOTTOM; y += 5, row += 1) {
-      g.rect(0, y, WIDTH, 5).fill(row % 2 ? COLORS.plankAlt : COLORS.plank);
-      g.rect(0, y + 4, WIDTH, 1).fill(COLORS.seam);
-      for (let x = (row % 3) * 11; x < WIDTH; x += 33) g.rect(x, y, 1, 4).fill(COLORS.seam);
-    }
-    g.rect(0, DECK_BOTTOM, WIDTH, EDGE - DECK_BOTTOM).fill(COLORS.beam);
-    g.rect(0, EDGE, WIDTH, HEIGHT - EDGE).fill(COLORS.seaFront);
-    for (let x = 14; x < WIDTH; x += 44) g.rect(x, EDGE, 5, 22).fill(COLORS.beam);
-    layer.addChild(g);
-
-    this.shimmerA = new Graphics();
-    this.shimmerB = new Graphics();
-    for (let i = 0; i < 26; i += 1) {
-      const x = (i * 97) % WIDTH;
-      const back = HORIZON + 4 + ((i * 13) % (DECK_TOP - HORIZON - 8));
-      const front = EDGE + 26 + ((i * 7) % (HEIGHT - EDGE - 30));
-      this.shimmerA.rect(x, back, 6, 1).rect(x + 20, front, 8, 1).fill(COLORS.shimmer);
-      this.shimmerB.rect(x + 9, back + 2, 5, 1).rect(x + 31, front + 2, 7, 1).fill(COLORS.shimmer);
-    }
-    this.shimmerB.visible = false;
-    layer.addChild(this.shimmerA, this.shimmerB);
-    return layer;
-  }
-
-  private buildBoard(): Container {
-    const layer = new Container();
-    const { x, y } = BOARD_POS;
-    const g = new Graphics();
-    g.rect(x + 8, y + 88, 4, DECK_TOP + 12 - (y + 88)).fill(COLORS.corkEdge);
-    g.rect(x + 74, y + 88, 4, DECK_TOP + 12 - (y + 88)).fill(COLORS.corkEdge);
-    box(g, x, y, 86, 90, COLORS.cork, COLORS.corkEdge);
-    g.rect(x + 1, y + 1, 84, 12).fill(COLORS.corkEdge);
-    const title = text("TASKS", COLORS.gold);
-    title.position.set(x + 4, y + 2);
-    layer.addChild(g, title);
+  private buildBoard(): void {
+    const { x, y, w, h } = BOARD;
+    const panel = new Graphics();
+    panel.roundRect(x - 6, y - 6, w + 12, h + 12, 6).fill("#5b3a1e");
+    panel.roundRect(x, y, w, h, 4).fill("#c89a5e");
+    this.world.addChild(panel);
+    const rowH = h / MAX_CARDS;
     for (let i = 0; i < MAX_CARDS; i += 1) {
-      const card: CardView = { bg: new Graphics(), label: text(""), glyph: text("") };
-      card.label.position.set(x + 9, y + 17 + i * 14);
-      card.glyph.anchor.set(1, 0);
-      card.glyph.position.set(x + 81, y + 17 + i * 14);
-      layer.addChild(card.bg, card.label, card.glyph);
+      const card: CardView = { bg: new Graphics(), label: text("", 20, PALETTE.ink), glyph: text("", 20, PALETTE.ink) };
+      card.label.anchor.set(0, 0.5);
+      card.label.position.set(x + 22, y + rowH * i + rowH / 2);
+      card.glyph.anchor.set(1, 0.5);
+      card.glyph.position.set(x + w - 12, y + rowH * i + rowH / 2);
+      this.world.addChild(card.bg, card.label, card.glyph);
       this.cards.push(card);
     }
-    return layer;
   }
 
-  private buildLighthouse(): Container {
-    const layer = new Container();
-    const g = new Graphics();
-    const cx = LIGHTHOUSE_X;
-    g.rect(cx - 26, DECK_TOP - 6, 52, DECK_BOTTOM - DECK_TOP + 6).fill("#5b5f6b");
-    g.rect(cx - 22, DECK_TOP - 10, 44, 6).fill("#6e7380");
-    for (let y = 40; y < DECK_TOP - 6; y += 1) {
-      const half = Math.round(9 + ((y - 40) / (DECK_TOP - 46)) * 5);
-      const stripe = Math.floor((y - 40) / 14) % 2 === 0 ? "#f3efe6" : "#c0392b";
-      g.rect(cx - half, y, half * 2, 1).fill(stripe);
-    }
-    g.circle(cx, 33, 16).fill({ color: "#fff3b0", alpha: 0.18 });
-    g.rect(cx - 10, 26, 20, 14).fill(COLORS.ink);
-    g.rect(cx - 7, 28, 14, 10).fill("#fff3b0");
-    g.rect(cx - 12, 39, 24, 2).fill(COLORS.ink);
-    for (let i = 0; i < 8; i += 1) g.rect(cx - i - 1, 18 + i, (i + 1) * 2, 1).fill("#c0392b");
-    const label = text("REVIEW", COLORS.cream);
-    label.anchor.set(0.5, 0);
-    label.position.set(cx, DECK_TOP + 8);
-    this.reviewBg = new Graphics();
-    this.reviewText = text("");
-    this.reviewText.anchor.set(0.5, 0);
-    this.reviewText.position.set(404, 86);
-    layer.addChild(g, label, this.reviewBg, this.reviewText);
-    return layer;
-  }
-
-  private buildStall(agentId: AgentId): Container {
-    const layer = new Container();
-    const cx = STALL_X[agentId];
-    const keeper = new Sprite(this.texture(KEEPER, keeperPalette(SHIRT[agentId], HAIR[agentId])));
-    keeper.scale.set(2);
-    keeper.position.set(cx - 10, 102);
+  private buildStall(agentId: AgentId): void {
+    const [x0, , x1] = STALLS[agentId].label;
+    const cx = (x0 + x1) / 2;
     const view: StallView = {
-      agentId,
-      cx,
-      frame: new Graphics(),
-      counter: new Graphics(),
-      sign: new Graphics(),
-      name: text(""),
-      flag: new Graphics(),
-      bubbleBg: new Graphics(),
-      bubbleText: text("", COLORS.ink),
+      plate: new Graphics(),
+      name: text("", 30),
+      role: text("", 15, PALETTE.muted),
       reps: new Graphics(),
-      keeper,
+      bubbleBg: new Graphics(),
+      bubbleText: text("", 28, PALETTE.ink),
     };
-    view.name.anchor.set(0.5, 0);
-    view.name.position.set(cx, 49);
-    view.bubbleText.anchor.set(0.5, 0);
-    view.bubbleText.position.set(cx, 28);
-    layer.addChild(
-      view.frame, keeper, view.counter, view.reps, view.sign, view.name, view.flag, view.bubbleBg, view.bubbleText,
-    );
+    view.name.anchor.set(0, 0.5);
+    view.name.position.set(cx - 190, 948);
+    view.role.anchor.set(0, 0.5);
+    view.role.position.set(cx - 190, 976);
+    view.bubbleText.position.set(cx, STALLS[agentId].front.y);
+    this.world.addChild(view.plate, view.name, view.role, view.reps, view.bubbleBg, view.bubbleText);
     for (const [i, type] of TASK_TYPES.entries()) {
-      const letter = text(type[0].toUpperCase(), COLORS.cream);
-      letter.position.set(cx - 27, 127 + i * 7);
-      layer.addChild(letter);
+      const letter = text(type[0].toUpperCase(), 14, PALETTE.cream);
+      letter.position.set(cx + 58, 942 + i * 16);
+      this.world.addChild(letter);
     }
     this.stalls.set(agentId, view);
-    return layer;
+  }
+
+  private buildClosedStall(): void {
+    const [x0, y0, x1, y1] = CLOSED_LABEL;
+    const cx = (x0 + x1) / 2;
+    const plate = new Graphics();
+    plate.roundRect(cx - 205, y0 - 13, 410, y1 - y0 + 26, 10).fill(PALETTE.muted);
+    plate.roundRect(cx - 200, y0 - 8, 400, y1 - y0 + 16, 7).fill({ color: PALETTE.ink, alpha: 0.94 });
+    const label = text("CLOSED", 30, PALETTE.muted);
+    label.position.set((x0 + x1) / 2, (y0 + y1) / 2);
+    this.world.addChild(plate, label);
   }
 
   // ------------------------------------------------------------ state → picture
   private apply(model: SceneModel): void {
-    this.banner.text = model.banner.length > 62 ? `${model.banner.slice(0, 59)}...` : model.banner;
+    this.banner.text = model.banner.length > 70 ? `${model.banner.slice(0, 67)}...` : model.banner;
     this.spent.text = model.spent;
 
     for (const agentId of AGENT_ORDER) {
-      const view = this.stalls.get(agentId)!;
-      const stall = model.stalls.find((s) => s.agentId === agentId);
-      this.drawStall(view, stall ?? null);
+      this.drawStall(agentId, this.stalls.get(agentId)!, model.stalls.find((s) => s.agentId === agentId) ?? null);
     }
+    this.drawBoard(model);
 
-    model.cards.forEach((card, i) => {
-      const view = this.cards[i];
-      const { x, y } = BOARD_POS;
-      const top = y + 16 + i * 14;
-      view.bg.clear();
-      if (card.current) view.bg.rect(x + 3, top - 1, 80, 14).fill(COLORS.gold);
-      box(view.bg, x + 4, top, 78, 12, CARD_FILL[card.status] ?? COLORS.cream);
-      view.bg.rect(x + 4, top, 3, 12).fill(TYPE_COLOR[card.type]);
-      if (card.winnerColor) view.bg.rect(x + 7, top + 10, 75, 2).fill(card.winnerColor);
-      const ink = card.status === "pending" ? COLORS.dim : COLORS.ink;
-      view.label.text = card.label;
-      view.label.style.fill = ink;
-      view.glyph.text = card.glyph;
-      view.glyph.style.fill = card.status === "failed" ? COLORS.bad : ink;
-    });
-    for (let i = model.cards.length; i < MAX_CARDS; i += 1) {
-      this.cards[i].bg.clear();
-      this.cards[i].label.text = "";
-      this.cards[i].glyph.text = "";
-    }
+    this.captainBg.clear();
+    this.captainText.text = model.captain;
+    const cw = Math.max(MAIN_BUBBLE[2] - MAIN_BUBBLE[0] - 8, this.captainText.width + 36);
+    bubble(this.captainBg, this.captainText.x, this.captainText.y, cw, MAIN_BUBBLE[3] - MAIN_BUBBLE[1] - 8, "down");
 
-    this.reviewBg.clear();
-    this.reviewText.text = model.review?.text ?? "";
-    if (model.review) {
-      const w = Math.ceil(this.reviewText.width) + 8;
-      box(this.reviewBg, 404 - Math.ceil(w / 2), 84, w, 12, REVIEW_COLOR[model.review.tone], COLORS.ink);
-      this.reviewText.style.fill = COLORS.ink;
+    this.gradeBg.clear();
+    this.gradeText.text = "";
+    if (model.reviewing) {
+      bubble(this.gradeBg, GRADE_BUBBLE.x, GRADE_BUBBLE.y, 110, 70, "down");
+      this.gradeText.text = "...";
+      this.gradeText.x = GRADE_BUBBLE.x;
+    } else if (model.review) {
+      const grade = model.review.text.split(" ")[1];
+      bubble(this.gradeBg, GRADE_BUBBLE.x + 14, GRADE_BUBBLE.y, 180, 76, "down");
+      this.drawVerdict(model.review.tone, GRADE_BUBBLE.x - 46, GRADE_BUBBLE.y);
+      this.gradeText.text = grade;
+      this.gradeText.x = GRADE_BUBBLE.x + 40;
     }
 
     this.finalBg.clear();
     this.finalText.text = model.finalBanner ?? "";
     if (model.finalBanner) {
-      const w = Math.ceil(this.finalText.width) + 12;
-      box(this.finalBg, Math.round(WIDTH / 2 - w / 2), 16, w, 12, COLORS.gold, COLORS.ink);
+      const w = this.finalText.width + 60;
+      this.finalBg.roundRect(WORLD.w / 2 - w / 2 - 5, 115, w + 10, 80, 12).fill(PALETTE.ink);
+      this.finalBg.roundRect(WORLD.w / 2 - w / 2, 120, w, 70, 9).fill(PALETTE.gold);
     }
   }
 
-  private drawStall(view: StallView, stall: StallModel | null): void {
-    const { cx, frame, counter } = view;
-    const color = stall?.color ?? "#777777";
-
-    frame.clear();
-    frame.rect(cx - 33, 76, 3, DECK_TOP + 8 - 76).fill(COLORS.beam);
-    frame.rect(cx + 30, 76, 3, DECK_TOP + 8 - 76).fill(COLORS.beam);
-    for (let i = 0; i < 10; i += 1) {
-      const x = cx - 35 + i * 7;
-      frame.rect(x, 60, 7, 16).fill(i % 2 ? COLORS.cream : color);
-      frame.rect(x + 1, 76, 5, 2).fill(i % 2 ? COLORS.cream : color);
+  private drawVerdict(tone: "good" | "ok" | "bad", x: number, y: number): void {
+    const g = this.gradeBg;
+    if (tone === "bad") {
+      g.moveTo(x - 20, y - 20).lineTo(x + 20, y + 20).moveTo(x + 20, y - 20).lineTo(x - 20, y + 20)
+        .stroke({ width: 12, color: PALETTE.bad, cap: "round" });
+    } else {
+      g.moveTo(x - 22, y).lineTo(x - 6, y + 18).lineTo(x + 24, y - 22)
+        .stroke({ width: 12, color: tone === "good" ? PALETTE.good : PALETTE.ok, cap: "round", join: "round" });
     }
-    frame.rect(cx - 35, 60, 70, 1).fill(COLORS.ink);
+  }
 
-    counter.clear();
-    box(counter, cx - 31, 124, 62, 26, "#8a5a33", "#3b2412");
-    counter.rect(cx - 30, 124, 60, 2).fill("#a8744a");
+  private drawBoard(model: SceneModel): void {
+    const { x, y, w, h } = BOARD;
+    const rowH = h / MAX_CARDS;
+    this.cards.forEach((view, i) => {
+      const card = model.cards[i];
+      view.bg.clear();
+      if (!card) {
+        view.label.text = "";
+        view.glyph.text = "";
+        return;
+      }
+      const top = y + i * rowH + 3;
+      if (card.current) view.bg.roundRect(x + 4, top - 3, w - 8, rowH, 4).fill(PALETTE.gold);
+      view.bg.roundRect(x + 8, top, w - 16, rowH - 6, 3).fill(CARD_FILL[card.status] ?? PALETTE.paper);
+      view.bg.rect(x + 8, top, 7, rowH - 6).fill(TYPE_COLOR[card.type]);
+      if (card.winnerColor) view.bg.rect(x + 15, top + rowH - 10, w - 23, 4).fill(card.winnerColor);
+      view.label.text = card.label;
+      view.label.style.fill = card.status === "pending" ? "#f3e6c8" : PALETTE.ink;
+      view.glyph.text = card.glyph;
+      view.glyph.style.fill = card.status === "failed" ? PALETTE.bad : PALETTE.ink;
+    });
+  }
+
+  private drawStall(agentId: AgentId, view: StallView, stall: StallModel | null): void {
+    const [x0, y0, x1, y1] = STALLS[agentId].label;
+    const cx = (x0 + x1) / 2;
+    const color = stall?.color ?? PALETTE.muted;
+    const plateW = 400;
+    const px = cx - plateW / 2;
+
+    view.plate.clear();
+    view.plate.roundRect(px - 5, y0 - 13, plateW + 10, y1 - y0 + 26, 10).fill(stall?.winner ? PALETTE.gold : color);
+    view.plate.roundRect(px, y0 - 8, plateW, y1 - y0 + 16, 7).fill({ color: PALETTE.ink, alpha: 0.94 });
+    view.name.text = stall?.name ?? "";
+    view.role.text = agentId === "haiku" ? "CHEAP VENDOR" : "PREMIUM VENDOR";
 
     view.reps.clear();
     TASK_TYPES.forEach((type, i) => {
-      const y = 129 + i * 7;
-      view.reps.rect(cx - 20, y, 46, 4).fill("#2a1a0e");
+      const by = 937 + i * 16;
       const rep = stall?.reputation[type] ?? 1;
-      const w = Math.max(0, Math.min(46, Math.round((rep / 2) * 46)));
-      view.reps.rect(cx - 20, y, w, 4).fill(TYPE_COLOR[type]);
-      view.reps.rect(cx + 3, y - 1, 1, 6).fill(COLORS.cream); // 1.0 tick
+      const w = Math.max(0, Math.min(120, Math.round((rep / 2) * 120)));
+      view.reps.rect(cx + 68, by, 120, 10).fill("#3a3a52");
+      view.reps.rect(cx + 68, by, w, 10).fill(TYPE_COLOR[type]);
+      view.reps.rect(cx + 127, by - 3, 3, 16).fill(PALETTE.cream); // 1.0 tick
     });
-
-    view.sign.clear();
-    box(view.sign, cx - 33, 47, 66, 12, COLORS.ink, stall?.winner ? COLORS.gold : color);
-    view.name.text = stall?.name ?? "";
-
-    view.flag.clear();
-    if (stall?.winner) {
-      view.flag.rect(cx + 34, 36, 1, 24).fill(COLORS.cream);
-      for (let i = 0; i < 6; i += 1) view.flag.rect(cx + 35, 37 + i, 10 - i * 2, 1).fill(COLORS.gold);
-    }
 
     view.bubbleBg.clear();
     view.bubbleText.text = stall?.bubble?.text ?? "";
     if (stall?.bubble) {
-      const w = Math.ceil(view.bubbleText.width) + 8;
-      box(view.bubbleBg, cx - Math.ceil(w / 2), 26, w, 12, BUBBLE_FILL[stall.bubble.tone], COLORS.ink);
-      view.bubbleBg.rect(cx - 1, 38, 3, 2).fill(COLORS.ink);
+      view.bubbleText.style.fill = BUBBLE_TEXT_COLOR[stall.bubble.tone];
+      const w = Math.max(90, view.bubbleText.width + 40);
+      bubble(view.bubbleBg, cx, STALLS[agentId].front.y, w, 54, "up",
+        stall.bubble.tone === "won" ? "#fff1c1" : PALETTE.paper);
     }
   }
-
-  private shimmerElapsed = 0;
-  private readonly shimmer = (ticker: { deltaMS: number }): void => {
-    this.shimmerElapsed += ticker.deltaMS;
-    if (this.shimmerElapsed < 600) return;
-    this.shimmerElapsed = 0;
-    this.shimmerA.visible = !this.shimmerA.visible;
-    this.shimmerB.visible = !this.shimmerB.visible;
-  };
 }

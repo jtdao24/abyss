@@ -39,6 +39,7 @@ export default function App() {
   const [state, setState] = useState(store.getState());
   const [pending, setPending] = useState(false);
   const [dismissedJob, setDismissedJob] = useState<string | null>(null);
+  const [showLedger, setShowLedger] = useState(params.get("ledger") === "1");
   const sourceRef = useRef<EventSource | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
   const directorRef = useRef<Director | null>(null);
@@ -104,11 +105,16 @@ export default function App() {
   const showDeliverable = state.final !== null && jobId !== dismissedJob;
 
   return (
-    <main className="app-shell">
+    <main className={`app-shell ${showLedger ? "" : "ledger-hidden"}`}>
       <section className="stage-shell" aria-label="Abyss pixel market">
         <header className="stage-header">
           <strong>ABYSS</strong>
-          <span className={`mode-badge ${badge.tone}`}>{badge.label}</span>
+          <div className="header-actions">
+            <button type="button" className="ledger-toggle" onClick={() => setShowLedger((v) => !v)}>
+              {showLedger ? "Hide ledger" : "Show ledger"}
+            </button>
+            <span className={`mode-badge ${badge.tone}`}>{badge.label}</span>
+          </div>
         </header>
         {SOURCE === "ws" && (
           <JobBar
@@ -137,7 +143,7 @@ export default function App() {
           )}
         </div>
       </section>
-      <DebugPanel state={state} />
+      {showLedger && <DebugPanel state={state} />}
     </main>
   );
 }
