@@ -1,0 +1,1091 @@
+[
+  {
+    "v": 1,
+    "seq": 0,
+    "t": 0,
+    "job_id": null,
+    "type": "hello",
+    "data": {
+      "agents": [
+        {
+          "agent_id": "haiku",
+          "display_name": "Haiku 4.5",
+          "model": "claude-haiku-4-5",
+          "color": "#4fb3a9"
+        },
+        {
+          "agent_id": "sonnet",
+          "display_name": "Sonnet 5",
+          "model": "claude-sonnet-5",
+          "color": "#e8a33d"
+        },
+        {
+          "agent_id": "opus",
+          "display_name": "Opus 5",
+          "model": "claude-opus-5",
+          "color": "#8e6cc9"
+        }
+      ],
+      "reputation": {
+        "haiku": {
+          "research": 1.0,
+          "writing": 1.0,
+          "checking": 1.0
+        },
+        "sonnet": {
+          "research": 1.0,
+          "writing": 1.0,
+          "checking": 1.0
+        },
+        "opus": {
+          "research": 1.0,
+          "writing": 1.0,
+          "checking": 1.0
+        }
+      },
+      "config": {
+        "price_weight": 1.0,
+        "rep_init": 1.0,
+        "rep_alpha": 0.3,
+        "task_types": [
+          "research",
+          "writing",
+          "checking"
+        ],
+        "real_models": true,
+        "fake_llm": false,
+        "orchestrator_model": "claude-sonnet-5",
+        "reviewer_model": "claude-sonnet-5"
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 1,
+    "t": 2100,
+    "job_id": "j_7f3a91c2",
+    "type": "job_split",
+    "data": {
+      "job_text": "Write a short explainer (under 150 words) on why most coasts get two high tides a day, and fact-check it.",
+      "tasks": [
+        {
+          "task_id": "t1",
+          "type": "research",
+          "title": "Gather the tide physics",
+          "brief": "List the key physical facts that explain two daily high tides, including the Sun's relative contribution and the length of a tidal day.",
+          "depends_on": []
+        },
+        {
+          "task_id": "t2",
+          "type": "writing",
+          "title": "Draft the explainer",
+          "brief": "Using the research, write a plain-language explainer under 150 words for a general reader.",
+          "depends_on": [
+            "t1"
+          ]
+        },
+        {
+          "task_id": "t3",
+          "type": "checking",
+          "title": "Fact-check the draft",
+          "brief": "Check every factual claim in the draft. Give a verdict and list any errors or needed caveats.",
+          "depends_on": [
+            "t2"
+          ]
+        }
+      ],
+      "price_weight": 1.0,
+      "usage": {
+        "model": "claude-sonnet-5",
+        "input_tokens": 520,
+        "output_tokens": 310,
+        "cost_usd": 0.00414,
+        "duration_ms": 2100
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 2,
+    "t": 2110,
+    "job_id": "j_7f3a91c2",
+    "type": "stats",
+    "data": {
+      "total_cost_usd": 0.00414,
+      "input_tokens": 520,
+      "output_tokens": 310,
+      "calls": 1,
+      "by_purpose": {
+        "split": {
+          "cost_usd": 0.00414,
+          "calls": 1
+        },
+        "bid": {
+          "cost_usd": 0.0,
+          "calls": 0
+        },
+        "work": {
+          "cost_usd": 0.0,
+          "calls": 0
+        },
+        "review": {
+          "cost_usd": 0.0,
+          "calls": 0
+        }
+      },
+      "by_agent": {
+        "haiku": {
+          "cost_usd": 0.0,
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "calls": 0,
+          "tasks_won": 0
+        },
+        "sonnet": {
+          "cost_usd": 0.0,
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "calls": 0,
+          "tasks_won": 0
+        },
+        "opus": {
+          "cost_usd": 0.0,
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "calls": 0,
+          "tasks_won": 0
+        }
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 3,
+    "t": 2150,
+    "job_id": "j_7f3a91c2",
+    "type": "task_posted",
+    "data": {
+      "task_id": "t1",
+      "type": "research",
+      "title": "Gather the tide physics",
+      "brief": "List the key physical facts that explain two daily high tides, including the Sun's relative contribution and the length of a tidal day.",
+      "depends_on": [],
+      "index": 0,
+      "total": 3,
+      "est_input_tokens": 180
+    }
+  },
+  {
+    "v": 1,
+    "seq": 4,
+    "t": 3350,
+    "job_id": "j_7f3a91c2",
+    "type": "bid",
+    "data": {
+      "task_id": "t1",
+      "agent_id": "haiku",
+      "ok": true,
+      "error": null,
+      "predicted_output_tokens": 400,
+      "est_input_tokens": 180,
+      "predicted_cost_usd": 0.00218,
+      "promised_quality": 8,
+      "pitch": "Fast, cheap, and I know my tides.",
+      "reputation": 1.0,
+      "score": 7.782,
+      "usage": {
+        "model": "claude-haiku-4-5",
+        "input_tokens": 350,
+        "output_tokens": 60,
+        "cost_usd": 0.00065,
+        "duration_ms": 1200
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 5,
+    "t": 4050,
+    "job_id": "j_7f3a91c2",
+    "type": "bid",
+    "data": {
+      "task_id": "t1",
+      "agent_id": "sonnet",
+      "ok": true,
+      "error": null,
+      "predicted_output_tokens": 500,
+      "est_input_tokens": 180,
+      "predicted_cost_usd": 0.00536,
+      "promised_quality": 8,
+      "pitch": "Balanced research, sources in mind.",
+      "reputation": 1.0,
+      "score": 7.464,
+      "usage": {
+        "model": "claude-sonnet-5",
+        "input_tokens": 350,
+        "output_tokens": 140,
+        "cost_usd": 0.0021,
+        "duration_ms": 1900
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 6,
+    "t": 4650,
+    "job_id": "j_7f3a91c2",
+    "type": "bid",
+    "data": {
+      "task_id": "t1",
+      "agent_id": "opus",
+      "ok": true,
+      "error": null,
+      "predicted_output_tokens": 600,
+      "est_input_tokens": 180,
+      "predicted_cost_usd": 0.0159,
+      "promised_quality": 9,
+      "pitch": "Deep, precise physics. No hand-waving.",
+      "reputation": 1.0,
+      "score": 7.41,
+      "usage": {
+        "model": "claude-opus-5",
+        "input_tokens": 350,
+        "output_tokens": 180,
+        "cost_usd": 0.00625,
+        "duration_ms": 2500
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 7,
+    "t": 4700,
+    "job_id": "j_7f3a91c2",
+    "type": "won",
+    "data": {
+      "task_id": "t1",
+      "agent_id": "haiku",
+      "mode": "auction",
+      "score": 7.782,
+      "runner_up_agent_id": "sonnet",
+      "runner_up_score": 7.464,
+      "scores": {
+        "haiku": 7.782,
+        "sonnet": 7.464,
+        "opus": 7.41
+      },
+      "price_weight": 1.0
+    }
+  },
+  {
+    "v": 1,
+    "seq": 8,
+    "t": 4710,
+    "job_id": "j_7f3a91c2",
+    "type": "stats",
+    "data": {
+      "total_cost_usd": 0.01314,
+      "input_tokens": 1570,
+      "output_tokens": 690,
+      "calls": 4,
+      "by_purpose": {
+        "split": {
+          "cost_usd": 0.00414,
+          "calls": 1
+        },
+        "bid": {
+          "cost_usd": 0.009,
+          "calls": 3
+        },
+        "work": {
+          "cost_usd": 0.0,
+          "calls": 0
+        },
+        "review": {
+          "cost_usd": 0.0,
+          "calls": 0
+        }
+      },
+      "by_agent": {
+        "haiku": {
+          "cost_usd": 0.00065,
+          "input_tokens": 350,
+          "output_tokens": 60,
+          "calls": 1,
+          "tasks_won": 1
+        },
+        "sonnet": {
+          "cost_usd": 0.0021,
+          "input_tokens": 350,
+          "output_tokens": 140,
+          "calls": 1,
+          "tasks_won": 0
+        },
+        "opus": {
+          "cost_usd": 0.00625,
+          "input_tokens": 350,
+          "output_tokens": 180,
+          "calls": 1,
+          "tasks_won": 0
+        }
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 9,
+    "t": 4750,
+    "job_id": "j_7f3a91c2",
+    "type": "working",
+    "data": {
+      "task_id": "t1",
+      "agent_id": "haiku"
+    }
+  },
+  {
+    "v": 1,
+    "seq": 10,
+    "t": 8950,
+    "job_id": "j_7f3a91c2",
+    "type": "done",
+    "data": {
+      "task_id": "t1",
+      "agent_id": "haiku",
+      "output": "- Tides are driven mainly by the Moon's gravity; the Sun's tidal force is about 46% of the Moon's.\n- The Moon pulls near-side ocean water toward it, forming a bulge.\n- A second bulge forms on the far side because the Moon pulls Earth's center harder than the far-side water.\n- Earth rotates through both bulges, giving two high tides about every 24 hours 50 minutes.\n- Spring tides happen at new and full moon, when Sun and Moon line up.",
+      "predicted_output_tokens": 400,
+      "predicted_cost_usd": 0.00218,
+      "usage": {
+        "model": "claude-haiku-4-5",
+        "input_tokens": 210,
+        "output_tokens": 455,
+        "cost_usd": 0.002485,
+        "duration_ms": 4200
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 11,
+    "t": 11250,
+    "job_id": "j_7f3a91c2",
+    "type": "graded",
+    "data": {
+      "task_id": "t1",
+      "agent_id": "haiku",
+      "grade": 6,
+      "promised_quality": 8,
+      "rationale": "Facts are correct but thin: the far-side bulge is asserted, not explained, and there is no caveat about diurnal coasts.",
+      "usage": {
+        "model": "claude-sonnet-5",
+        "input_tokens": 700,
+        "output_tokens": 120,
+        "cost_usd": 0.0026,
+        "duration_ms": 2300
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 12,
+    "t": 11260,
+    "job_id": "j_7f3a91c2",
+    "type": "rep_update",
+    "data": {
+      "task_id": "t1",
+      "agent_id": "haiku",
+      "task_type": "research",
+      "old": 1.0,
+      "new": 0.925,
+      "ratio": 0.75
+    }
+  },
+  {
+    "v": 1,
+    "seq": 13,
+    "t": 11270,
+    "job_id": "j_7f3a91c2",
+    "type": "stats",
+    "data": {
+      "total_cost_usd": 0.018225,
+      "input_tokens": 2480,
+      "output_tokens": 1265,
+      "calls": 6,
+      "by_purpose": {
+        "split": {
+          "cost_usd": 0.00414,
+          "calls": 1
+        },
+        "bid": {
+          "cost_usd": 0.009,
+          "calls": 3
+        },
+        "work": {
+          "cost_usd": 0.002485,
+          "calls": 1
+        },
+        "review": {
+          "cost_usd": 0.0026,
+          "calls": 1
+        }
+      },
+      "by_agent": {
+        "haiku": {
+          "cost_usd": 0.003135,
+          "input_tokens": 560,
+          "output_tokens": 515,
+          "calls": 2,
+          "tasks_won": 1
+        },
+        "sonnet": {
+          "cost_usd": 0.0021,
+          "input_tokens": 350,
+          "output_tokens": 140,
+          "calls": 1,
+          "tasks_won": 0
+        },
+        "opus": {
+          "cost_usd": 0.00625,
+          "input_tokens": 350,
+          "output_tokens": 180,
+          "calls": 1,
+          "tasks_won": 0
+        }
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 14,
+    "t": 11350,
+    "job_id": "j_7f3a91c2",
+    "type": "task_posted",
+    "data": {
+      "task_id": "t2",
+      "type": "writing",
+      "title": "Draft the explainer",
+      "brief": "Using the research, write a plain-language explainer under 150 words for a general reader.",
+      "depends_on": [
+        "t1"
+      ],
+      "index": 1,
+      "total": 3,
+      "est_input_tokens": 420
+    }
+  },
+  {
+    "v": 1,
+    "seq": 15,
+    "t": 12450,
+    "job_id": "j_7f3a91c2",
+    "type": "bid",
+    "data": {
+      "task_id": "t2",
+      "agent_id": "haiku",
+      "ok": true,
+      "error": null,
+      "predicted_output_tokens": 250,
+      "est_input_tokens": 420,
+      "predicted_cost_usd": 0.00167,
+      "promised_quality": 8,
+      "pitch": "Tight 150 words, lowest price on the pier.",
+      "reputation": 1.0,
+      "score": 7.833,
+      "usage": {
+        "model": "claude-haiku-4-5",
+        "input_tokens": 560,
+        "output_tokens": 58,
+        "cost_usd": 0.00085,
+        "duration_ms": 1100
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 16,
+    "t": 13350,
+    "job_id": "j_7f3a91c2",
+    "type": "bid",
+    "data": {
+      "task_id": "t2",
+      "agent_id": "sonnet",
+      "ok": true,
+      "error": null,
+      "predicted_output_tokens": 300,
+      "est_input_tokens": 420,
+      "predicted_cost_usd": 0.00384,
+      "promised_quality": 9,
+      "pitch": "Clear prose that actually uses the research.",
+      "reputation": 1.0,
+      "score": 8.616,
+      "usage": {
+        "model": "claude-sonnet-5",
+        "input_tokens": 560,
+        "output_tokens": 150,
+        "cost_usd": 0.00262,
+        "duration_ms": 2000
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 17,
+    "t": 13950,
+    "job_id": "j_7f3a91c2",
+    "type": "bid",
+    "data": {
+      "task_id": "t2",
+      "agent_id": "opus",
+      "ok": true,
+      "error": null,
+      "predicted_output_tokens": 350,
+      "est_input_tokens": 420,
+      "predicted_cost_usd": 0.01085,
+      "promised_quality": 9,
+      "pitch": "Polished. Every sentence earns its place.",
+      "reputation": 1.0,
+      "score": 7.915,
+      "usage": {
+        "model": "claude-opus-5",
+        "input_tokens": 560,
+        "output_tokens": 170,
+        "cost_usd": 0.00705,
+        "duration_ms": 2600
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 18,
+    "t": 14000,
+    "job_id": "j_7f3a91c2",
+    "type": "won",
+    "data": {
+      "task_id": "t2",
+      "agent_id": "sonnet",
+      "mode": "auction",
+      "score": 8.616,
+      "runner_up_agent_id": "opus",
+      "runner_up_score": 7.915,
+      "scores": {
+        "haiku": 7.833,
+        "sonnet": 8.616,
+        "opus": 7.915
+      },
+      "price_weight": 1.0
+    }
+  },
+  {
+    "v": 1,
+    "seq": 19,
+    "t": 14010,
+    "job_id": "j_7f3a91c2",
+    "type": "stats",
+    "data": {
+      "total_cost_usd": 0.028745,
+      "input_tokens": 4160,
+      "output_tokens": 1643,
+      "calls": 9,
+      "by_purpose": {
+        "split": {
+          "cost_usd": 0.00414,
+          "calls": 1
+        },
+        "bid": {
+          "cost_usd": 0.01952,
+          "calls": 6
+        },
+        "work": {
+          "cost_usd": 0.002485,
+          "calls": 1
+        },
+        "review": {
+          "cost_usd": 0.0026,
+          "calls": 1
+        }
+      },
+      "by_agent": {
+        "haiku": {
+          "cost_usd": 0.003985,
+          "input_tokens": 1120,
+          "output_tokens": 573,
+          "calls": 3,
+          "tasks_won": 1
+        },
+        "sonnet": {
+          "cost_usd": 0.00472,
+          "input_tokens": 910,
+          "output_tokens": 290,
+          "calls": 2,
+          "tasks_won": 1
+        },
+        "opus": {
+          "cost_usd": 0.0133,
+          "input_tokens": 910,
+          "output_tokens": 350,
+          "calls": 2,
+          "tasks_won": 0
+        }
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 20,
+    "t": 14050,
+    "job_id": "j_7f3a91c2",
+    "type": "working",
+    "data": {
+      "task_id": "t2",
+      "agent_id": "sonnet"
+    }
+  },
+  {
+    "v": 1,
+    "seq": 21,
+    "t": 23850,
+    "job_id": "j_7f3a91c2",
+    "type": "done",
+    "data": {
+      "task_id": "t2",
+      "agent_id": "sonnet",
+      "output": "Why two high tides a day?\n\nThe Moon's gravity tugs on all of Earth, but not evenly. Water on the side facing the Moon is pulled a little harder than Earth's center, so it heaps into a bulge. On the far side, Earth's center is pulled harder than the distant water, which is left behind as a second bulge. As Earth spins, a coastline passes through both bulges, so most places see two high tides roughly every 24 hours and 50 minutes. The extra 50 minutes comes from the Moon moving along its orbit while we turn. The Sun adds a smaller tidal pull, about 46% of the Moon's; when the two line up at new and full moon, we get extra-high spring tides.",
+      "predicted_output_tokens": 300,
+      "predicted_cost_usd": 0.00384,
+      "usage": {
+        "model": "claude-sonnet-5",
+        "input_tokens": 470,
+        "output_tokens": 720,
+        "cost_usd": 0.00814,
+        "duration_ms": 9800
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 22,
+    "t": 25950,
+    "job_id": "j_7f3a91c2",
+    "type": "graded",
+    "data": {
+      "task_id": "t2",
+      "agent_id": "sonnet",
+      "grade": 9,
+      "promised_quality": 9,
+      "rationale": "Accurate, readable, under the length limit, and it explains the far-side bulge well.",
+      "usage": {
+        "model": "claude-sonnet-5",
+        "input_tokens": 820,
+        "output_tokens": 110,
+        "cost_usd": 0.00274,
+        "duration_ms": 2100
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 23,
+    "t": 25960,
+    "job_id": "j_7f3a91c2",
+    "type": "rep_update",
+    "data": {
+      "task_id": "t2",
+      "agent_id": "sonnet",
+      "task_type": "writing",
+      "old": 1.0,
+      "new": 1.0,
+      "ratio": 1.0
+    }
+  },
+  {
+    "v": 1,
+    "seq": 24,
+    "t": 25970,
+    "job_id": "j_7f3a91c2",
+    "type": "stats",
+    "data": {
+      "total_cost_usd": 0.039625,
+      "input_tokens": 5450,
+      "output_tokens": 2473,
+      "calls": 11,
+      "by_purpose": {
+        "split": {
+          "cost_usd": 0.00414,
+          "calls": 1
+        },
+        "bid": {
+          "cost_usd": 0.01952,
+          "calls": 6
+        },
+        "work": {
+          "cost_usd": 0.010625,
+          "calls": 2
+        },
+        "review": {
+          "cost_usd": 0.00534,
+          "calls": 2
+        }
+      },
+      "by_agent": {
+        "haiku": {
+          "cost_usd": 0.003985,
+          "input_tokens": 1120,
+          "output_tokens": 573,
+          "calls": 3,
+          "tasks_won": 1
+        },
+        "sonnet": {
+          "cost_usd": 0.01286,
+          "input_tokens": 1380,
+          "output_tokens": 1010,
+          "calls": 3,
+          "tasks_won": 1
+        },
+        "opus": {
+          "cost_usd": 0.0133,
+          "input_tokens": 910,
+          "output_tokens": 350,
+          "calls": 2,
+          "tasks_won": 0
+        }
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 25,
+    "t": 26050,
+    "job_id": "j_7f3a91c2",
+    "type": "task_posted",
+    "data": {
+      "task_id": "t3",
+      "type": "checking",
+      "title": "Fact-check the draft",
+      "brief": "Check every factual claim in the draft. Give a verdict and list any errors or needed caveats.",
+      "depends_on": [
+        "t2"
+      ],
+      "index": 2,
+      "total": 3,
+      "est_input_tokens": 380
+    }
+  },
+  {
+    "v": 1,
+    "seq": 26,
+    "t": 27050,
+    "job_id": "j_7f3a91c2",
+    "type": "bid",
+    "data": {
+      "task_id": "t3",
+      "agent_id": "haiku",
+      "ok": true,
+      "error": null,
+      "predicted_output_tokens": 200,
+      "est_input_tokens": 380,
+      "predicted_cost_usd": 0.00138,
+      "promised_quality": 9,
+      "pitch": "I'll check every number, quick.",
+      "reputation": 1.0,
+      "score": 8.862,
+      "usage": {
+        "model": "claude-haiku-4-5",
+        "input_tokens": 520,
+        "output_tokens": 55,
+        "cost_usd": 0.000795,
+        "duration_ms": 1000
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 27,
+    "t": 27850,
+    "job_id": "j_7f3a91c2",
+    "type": "bid",
+    "data": {
+      "task_id": "t3",
+      "agent_id": "sonnet",
+      "ok": true,
+      "error": null,
+      "predicted_output_tokens": 250,
+      "est_input_tokens": 380,
+      "predicted_cost_usd": 0.00326,
+      "promised_quality": 9,
+      "pitch": "Careful line-by-line fact-check.",
+      "reputation": 1.0,
+      "score": 8.674,
+      "usage": {
+        "model": "claude-sonnet-5",
+        "input_tokens": 520,
+        "output_tokens": 130,
+        "cost_usd": 0.00234,
+        "duration_ms": 1800
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 28,
+    "t": 28450,
+    "job_id": "j_7f3a91c2",
+    "type": "bid",
+    "data": {
+      "task_id": "t3",
+      "agent_id": "opus",
+      "ok": true,
+      "error": null,
+      "predicted_output_tokens": 300,
+      "est_input_tokens": 380,
+      "predicted_cost_usd": 0.0094,
+      "promised_quality": 10,
+      "pitch": "Rigorous check against known physics.",
+      "reputation": 1.0,
+      "score": 9.06,
+      "usage": {
+        "model": "claude-opus-5",
+        "input_tokens": 520,
+        "output_tokens": 160,
+        "cost_usd": 0.0066,
+        "duration_ms": 2400
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 29,
+    "t": 28500,
+    "job_id": "j_7f3a91c2",
+    "type": "won",
+    "data": {
+      "task_id": "t3",
+      "agent_id": "opus",
+      "mode": "auction",
+      "score": 9.06,
+      "runner_up_agent_id": "haiku",
+      "runner_up_score": 8.862,
+      "scores": {
+        "haiku": 8.862,
+        "sonnet": 8.674,
+        "opus": 9.06
+      },
+      "price_weight": 1.0
+    }
+  },
+  {
+    "v": 1,
+    "seq": 30,
+    "t": 28510,
+    "job_id": "j_7f3a91c2",
+    "type": "stats",
+    "data": {
+      "total_cost_usd": 0.04936,
+      "input_tokens": 7010,
+      "output_tokens": 2818,
+      "calls": 14,
+      "by_purpose": {
+        "split": {
+          "cost_usd": 0.00414,
+          "calls": 1
+        },
+        "bid": {
+          "cost_usd": 0.029255,
+          "calls": 9
+        },
+        "work": {
+          "cost_usd": 0.010625,
+          "calls": 2
+        },
+        "review": {
+          "cost_usd": 0.00534,
+          "calls": 2
+        }
+      },
+      "by_agent": {
+        "haiku": {
+          "cost_usd": 0.00478,
+          "input_tokens": 1640,
+          "output_tokens": 628,
+          "calls": 4,
+          "tasks_won": 1
+        },
+        "sonnet": {
+          "cost_usd": 0.0152,
+          "input_tokens": 1900,
+          "output_tokens": 1140,
+          "calls": 4,
+          "tasks_won": 1
+        },
+        "opus": {
+          "cost_usd": 0.0199,
+          "input_tokens": 1430,
+          "output_tokens": 510,
+          "calls": 3,
+          "tasks_won": 1
+        }
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 31,
+    "t": 28550,
+    "job_id": "j_7f3a91c2",
+    "type": "working",
+    "data": {
+      "task_id": "t3",
+      "agent_id": "opus"
+    }
+  },
+  {
+    "v": 1,
+    "seq": 32,
+    "t": 39750,
+    "job_id": "j_7f3a91c2",
+    "type": "done",
+    "data": {
+      "task_id": "t3",
+      "agent_id": "opus",
+      "output": "Verdict: accurate, one caveat.\n- Two bulges from differential gravity: correct.\n- Tidal day of about 24 h 50 min: correct.\n- Sun's tidal force about 46% of the Moon's: correct.\n- Caveat: 'most places' is right; some coasts (e.g. parts of the Gulf of Mexico) get one high tide a day.",
+      "predicted_output_tokens": 300,
+      "predicted_cost_usd": 0.0094,
+      "usage": {
+        "model": "claude-opus-5",
+        "input_tokens": 430,
+        "output_tokens": 610,
+        "cost_usd": 0.0174,
+        "duration_ms": 11200
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 33,
+    "t": 41750,
+    "job_id": "j_7f3a91c2",
+    "type": "graded",
+    "data": {
+      "task_id": "t3",
+      "agent_id": "opus",
+      "grade": 9,
+      "promised_quality": 10,
+      "rationale": "Checks every claim, correct verdict, and adds a real caveat instead of inventing problems.",
+      "usage": {
+        "model": "claude-sonnet-5",
+        "input_tokens": 760,
+        "output_tokens": 100,
+        "cost_usd": 0.00252,
+        "duration_ms": 2000
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 34,
+    "t": 41760,
+    "job_id": "j_7f3a91c2",
+    "type": "rep_update",
+    "data": {
+      "task_id": "t3",
+      "agent_id": "opus",
+      "task_type": "checking",
+      "old": 1.0,
+      "new": 0.97,
+      "ratio": 0.9
+    }
+  },
+  {
+    "v": 1,
+    "seq": 35,
+    "t": 41770,
+    "job_id": "j_7f3a91c2",
+    "type": "stats",
+    "data": {
+      "total_cost_usd": 0.06928,
+      "input_tokens": 8200,
+      "output_tokens": 3528,
+      "calls": 16,
+      "by_purpose": {
+        "split": {
+          "cost_usd": 0.00414,
+          "calls": 1
+        },
+        "bid": {
+          "cost_usd": 0.029255,
+          "calls": 9
+        },
+        "work": {
+          "cost_usd": 0.028025,
+          "calls": 3
+        },
+        "review": {
+          "cost_usd": 0.00786,
+          "calls": 3
+        }
+      },
+      "by_agent": {
+        "haiku": {
+          "cost_usd": 0.00478,
+          "input_tokens": 1640,
+          "output_tokens": 628,
+          "calls": 4,
+          "tasks_won": 1
+        },
+        "sonnet": {
+          "cost_usd": 0.0152,
+          "input_tokens": 1900,
+          "output_tokens": 1140,
+          "calls": 4,
+          "tasks_won": 1
+        },
+        "opus": {
+          "cost_usd": 0.0373,
+          "input_tokens": 1860,
+          "output_tokens": 1120,
+          "calls": 4,
+          "tasks_won": 1
+        }
+      }
+    }
+  },
+  {
+    "v": 1,
+    "seq": 36,
+    "t": 41850,
+    "job_id": "j_7f3a91c2",
+    "type": "final",
+    "data": {
+      "status": "ok",
+      "deliverable_task_id": "t2",
+      "deliverable": "Why two high tides a day?\n\nThe Moon's gravity tugs on all of Earth, but not evenly. Water on the side facing the Moon is pulled a little harder than Earth's center, so it heaps into a bulge. On the far side, Earth's center is pulled harder than the distant water, which is left behind as a second bulge. As Earth spins, a coastline passes through both bulges, so most places see two high tides roughly every 24 hours and 50 minutes. The extra 50 minutes comes from the Moon moving along its orbit while we turn. The Sun adds a smaller tidal pull, about 46% of the Moon's; when the two line up at new and full moon, we get extra-high spring tides.",
+      "tasks": [
+        {
+          "task_id": "t1",
+          "type": "research",
+          "agent_id": "haiku",
+          "grade": 6,
+          "promised_quality": 8,
+          "cost_usd": 0.014085
+        },
+        {
+          "task_id": "t2",
+          "type": "writing",
+          "agent_id": "sonnet",
+          "grade": 9,
+          "promised_quality": 9,
+          "cost_usd": 0.0214
+        },
+        {
+          "task_id": "t3",
+          "type": "checking",
+          "agent_id": "opus",
+          "grade": 9,
+          "promised_quality": 10,
+          "cost_usd": 0.029655
+        }
+      ],
+      "total_cost_usd": 0.06928,
+      "mean_grade": 8.0,
+      "duration_ms": 41850
+    }
+  }
+]
