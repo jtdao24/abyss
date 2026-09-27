@@ -9,13 +9,16 @@ from __future__ import annotations
 
 import base64
 import binascii
+import asyncio
 import html
 import io
+import ipaddress
 import json
 import re
 import secrets
+import socket
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import ParseResult, urlparse
 
 import httpx
 
@@ -24,6 +27,7 @@ from . import config
 MAX_UPLOAD_BYTES = 5 * 1024 * 1024       # 5 MB file
 MAX_FETCH_BYTES = 2 * 1024 * 1024        # 2 MB web page
 FETCH_TIMEOUT_SECONDS = 10.0
+MAX_REDIRECTS = 5
 MAX_TEXT_CHARS = 60_000                  # kept per attachment
 PER_ATTACHMENT_PROMPT_CHARS = 6_000      # sent to the AI per attachment
 TOTAL_PROMPT_CHARS = 15_000              # sent to the AI for all attachments
@@ -33,6 +37,9 @@ TEXT_TYPES = {".txt", ".md", ".csv", ".json", ".tsv", ".log"}
 
 class AttachmentError(ValueError):
     pass
+
+
+_transport: httpx.AsyncBaseTransport | None = None  # tests swap in a MockTransport
 
 
 def attachments_dir() -> Path:
@@ -73,22 +80,67 @@ def text_from_html(page: str) -> str:
     return _clean(html.unescape(page))
 
 
+async def _resolve(host: str, port: int) -> list[str]:
+    """Every address `host` resolves to (a seam for tests)."""
+    infos = await asyncio.get_running_loop().getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    return [info[4][0] for info in infos]
+
+
+def _is_public(address: str) -> bool:
+    try:
+        ip = ipaddress.ip_address(address.split("%", 1)[0])  # drop an IPv6 zone id
+    except ValueError:
+        return False
+    if ip.version == 6 and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    return ip.is_global and not ip.is_multicast
+
+
+async def _check_link(url: str) -> ParseResult:
+    """Only public web pages: no file:// and, unless allowed, nothing on this
+    computer or the local network (routers, admin pages, this very server)."""
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        raise AttachmentError("links must start with http:// or https://")
+    if config.allow_private_links():
+        return parsed
+    try:
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        addresses = await _resolve(parsed.hostname, port)
+    except ValueError as exc:
+        raise AttachmentError("that link has a bad port") from exc
+    except OSError as exc:
+        raise AttachmentError(f"couldn't find {parsed.hostname}") from exc
+    if not addresses or not all(_is_public(a) for a in addresses):
+        raise AttachmentError(
+            "links to this computer or your local network can't be attached "
+            "(set ABYSS_ALLOW_PRIVATE_LINKS=1 to allow them)"
+        )
+    return parsed
+
+
 async def text_from_url(url: str) -> tuple[str, str]:
     """(title-ish name, text) for a web page."""
-    parsed = urlparse(url)
-    if parsed.scheme not in ("http", "https") or not parsed.netloc:
-        raise AttachmentError("links must start with http:// or https://")
     try:
-        async with httpx.AsyncClient(timeout=FETCH_TIMEOUT_SECONDS, follow_redirects=True) as client:
-            async with client.stream("GET", url, headers={"User-Agent": "Abyss/1.0 (local research tool)"}) as response:
-                if response.status_code >= 400:
-                    raise AttachmentError(f"that page answered {response.status_code}")
-                body = b""
-                async for chunk in response.aiter_bytes():
-                    body += chunk
-                    if len(body) > MAX_FETCH_BYTES:
-                        break
-                content_type = response.headers.get("content-type", "")
+        # Redirects are followed by hand so every hop is checked, not just the first.
+        async with httpx.AsyncClient(timeout=FETCH_TIMEOUT_SECONDS, transport=_transport) as client:
+            for _ in range(MAX_REDIRECTS + 1):
+                parsed = await _check_link(url)
+                async with client.stream("GET", url, headers={"User-Agent": "Abyss/1.0 (local research tool)"}) as response:
+                    if response.is_redirect:
+                        url = str(response.url.join(response.headers["location"]))
+                        continue
+                    if response.status_code >= 400:
+                        raise AttachmentError(f"that page answered {response.status_code}")
+                    body = b""
+                    async for chunk in response.aiter_bytes():
+                        body += chunk
+                        if len(body) > MAX_FETCH_BYTES:
+                            break
+                    content_type = response.headers.get("content-type", "")
+                    break
+            else:
+                raise AttachmentError("that link redirects too many times")
     except httpx.HTTPError as exc:
         raise AttachmentError(f"couldn't fetch that link: {exc}") from exc
     if "pdf" in content_type:

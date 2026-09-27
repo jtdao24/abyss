@@ -95,6 +95,12 @@ def fake_delay() -> float:
     return float(os.getenv("ABYSS_FAKE_DELAY", "0.3"))
 
 
+def allow_private_links() -> bool:
+    """Attach links on this computer or the local network (off: keeps a
+    session from being pointed at routers, admin pages or this server)."""
+    return os.getenv("ABYSS_ALLOW_PRIVATE_LINKS") == "1"
+
+
 def ledger_path() -> Path:
     override = os.getenv("ABYSS_LEDGER_PATH")
     return Path(override) if override is not None else REPO_ROOT / "runs" / "ledger.jsonl"

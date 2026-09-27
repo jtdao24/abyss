@@ -83,7 +83,7 @@ Click the Main Agent on the boat to open the Captain terminal. Type a job and pr
 | `/price <0-5>` | how much price matters when choosing a vendor (0 = quality only) |
 | `/budget <usd\|off>` | hard spending cap for your next job |
 | `/ai [name]` | pick the AI for your next job |
-| `/link <url>`, `/file` | attach a link or a file to your next job |
+| `/link <url>`, `/file` | attach a link or a file to your next job (links must be public web pages; set `ABYSS_ALLOW_PRIVATE_LINKS=1` in `backend/.env` to allow your local network) |
 | `/tools [on\|off <name>\|all]` | which tool servers the vendors may use |
 | `/examples`, `/example <n>` | sample jobs |
 | `/estimate` | what a typical job costs |
