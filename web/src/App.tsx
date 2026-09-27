@@ -152,7 +152,7 @@ export default function App() {
         <header className="stage-header">
           <div className="title">
             <strong>ABYSS</strong>
-            <small>Click the Captain on the boat to start a session. Click anyone else to zoom in and watch.</small>
+            <small>Click the Captain on the boat to open the terminal and type a job (python start.py --chat works too). Click anyone to zoom in.</small>
           </div>
           <div className="header-actions">
             {SOURCE === "ws" && (
@@ -169,7 +169,7 @@ export default function App() {
               </button>
             )}
             <CostCompare state={state} />
-            <button type="button" className="ledger-toggle" onClick={() => { setShowLedger((v) => !v); setShowTools(false); }}>
+            <button type="button" className="ledger-toggle" aria-pressed={showLedger} onClick={() => { setShowLedger((v) => !v); setShowTools(false); }}>
               {showLedger ? (rawLedger ? "Hide ledger" : "Hide costs") : rawLedger ? "Show ledger" : "Costs"}
             </button>
             <span className={`mode-badge ${badge.tone}`}>{badge.label}</span>

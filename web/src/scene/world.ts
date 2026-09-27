@@ -49,7 +49,7 @@ export interface Interactable {
 }
 
 export const INTERACTABLES: Interactable[] = [
-  { id: "main", label: "CAPTAIN - GIVE A JOB", hit: [445, 670, 575, 775], approach: { x: 312, y: 728 } },
+  { id: "main", label: "CAPTAIN - OPEN TERMINAL", hit: [445, 670, 575, 775], approach: { x: 312, y: 728 } },
   { id: "reviewer", label: "LIFEGUARD", hit: [118, 470, 205, 580], approach: { x: 205, y: 615 } },
   vendorAt("opus", "VENDOR 1", STALLS.opus.home),
   vendorAt("sonnet", "VENDOR 2", STALLS.sonnet.home),

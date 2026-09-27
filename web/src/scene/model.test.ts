@@ -49,6 +49,14 @@ describe("sceneModel", () => {
     expect(sceneModel(state).review).toEqual({ text: "T1 6/10", tone: "bad" });
   });
 
+  it("shows DONE only until the work is graded", () => {
+    const bubble = (state: ReturnType<typeof stateAfter>) => sceneModel(state).stalls.find((s) => s.agentId === "haiku")!.bubble;
+    expect(bubble(stateAfter((ev) => ev.type === "done" && ev.data.task_id === "t1"))?.text).toBe("DONE");
+    expect(bubble(stateAfter((ev) => ev.type === "graded" && ev.data.task_id === "t1"))).toBeNull();
+    const end = sceneModel(events.reduce(reduce, initialState));
+    expect(end.stalls.every((s) => s.bubble === null)).toBe(true); // nothing left hanging after the job
+  });
+
   it("ends with every card graded, the final banner, and the fixture total", () => {
     const model = sceneModel(events.reduce(reduce, initialState));
     expect(model.cards.map((c) => c.status)).toEqual(["graded", "graded", "graded"]);
