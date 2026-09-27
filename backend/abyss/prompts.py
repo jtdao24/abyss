@@ -6,6 +6,12 @@ job leaves something out or has a placeholder like [topic] or [N], choose a
 sensible, concrete option yourself, state that choice in one short line, and
 deliver the complete work."""
 
+# Each tool round is a wait the client watches: only research browses.
+NO_LOOKUPS = """
+The research is already done: work from the supplied material and don't use
+tools to look things up. Use a tool only to carry out an action the brief asks
+for, like posting or saving something."""
+
 SPLIT_SYSTEM = """You split jobs into a short sequence of typed tasks.
 Prefer three tasks. Use only research, writing, or checking. Put a writing task
 before any final checking task. Dependencies are zero-based indices and may only
@@ -34,9 +40,9 @@ WORK_SYSTEM = {
 bullets using at most 200 words. Avoid padding and unsupported claims.""" + NO_QUESTIONS,
     "writing": """Complete the writing task clearly and follow every job constraint.
 Use the supplied dependency material. If the job asks for code, write the
-complete, working code with brief comments; otherwise write at most 250 words.""" + NO_QUESTIONS,
+complete, working code with brief comments; otherwise write at most 250 words.""" + NO_QUESTIONS + NO_LOOKUPS,
     "checking": """Check the supplied work carefully. Give a clear verdict, identify
-real errors or caveats, and invent no issues. Use at most 250 words.""" + NO_QUESTIONS,
+real errors or caveats, and invent no issues. Use at most 250 words.""" + NO_QUESTIONS + NO_LOOKUPS,
 }
 
 WORK_USER = """Job:
@@ -52,7 +58,9 @@ Dependency outputs:
 WORK_TOOLS = """
 
 You have tools connected to outside apps (for example Slack, Discord or Notion).
-Use them to look things up when that helps the task. Only post, send, create or
+Use them to look things up when that helps the task, but keep it quick: one or
+two lookups, and when you need several pages, request them all at once in the
+same turn rather than one after another. Only post, send, create or
 edit anything in those apps when your task brief asks for exactly that, and do it
 once. Say in your answer what you did with a tool."""
 

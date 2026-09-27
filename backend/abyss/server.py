@@ -33,9 +33,20 @@ from .sessions import SessionStore, usage_summary, vendor_stats
 logger = logging.getLogger(__name__)
 
 
+async def _warm_tools() -> None:
+    try:
+        await tools.shared().start()
+    except Exception as exc:  # a tool server that won't start must not stop the market
+        logger.warning("tool servers didn't start: %s", exc)
+
+
 @contextlib.asynccontextmanager
 async def _lifespan(_app: FastAPI):
+    # Start the tool servers now, so the first job doesn't wait for them to launch.
+    warm = None if config.fake_llm() else asyncio.create_task(_warm_tools())
     yield
+    if warm is not None:
+        warm.cancel()
     with contextlib.suppress(Exception):
         await tools.shared().close()
 

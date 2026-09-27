@@ -235,7 +235,7 @@ def available_providers() -> list[str]:
     return sorted(found, key=lambda name: name != default) or [default]
 
 
-MAX_TOOL_ROUNDS = 8  # tool calls a vendor may chain in one piece of work
+MAX_TOOL_ROUNDS = 2 # tool calls a vendor may chain in one piece of work (each round is a wait)
 
 
 def mcp_config_path() -> Path:
