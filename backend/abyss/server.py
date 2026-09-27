@@ -20,7 +20,8 @@ from . import attachments, config, limits, mcp_admin, tools
 from .contract import validate_event
 from .events import EventStream, hello_data
 from .llm import LLM
-from .market import Guidance, run_job
+from .market import Guidance, RetryPlan, run_job
+from .orchestrator import TaskSpec
 from .reputation import ReputationStore
 from .estimate import estimate_session
 from .sessions import SessionStore, usage_summary, vendor_stats
@@ -100,16 +101,21 @@ class Market:
         budget_usd: float | None = None,
         attachment_ids: list[str] | None = None,
         tool_servers: list[str] | None = None,
+        retry: tuple[str, RetryPlan] | None = None,
     ) -> None:
         self.backlog = []
         self.guidance = Guidance()
         context, names = attachments.context_for(attachment_ids or [])
         sessions.expect(job, provider, budget_usd, names, tool_servers, attachment_ids)
+        plan = None
+        if retry is not None:
+            source_id, plan = retry
+            sessions.expect_retry(source_id)
         self.running = asyncio.create_task(
             self._run(
                 job, price_weight, self.guidance, llm_for(provider),
                 limits.job_budget(budget_usd),  # the spending limits cap this job too
-                context, names, tool_servers,
+                context, names, tool_servers, plan,
             )
         )
 
@@ -123,6 +129,7 @@ class Market:
         context: str | None = None,
         context_names: list[str] | None = None,
         tool_servers: list[str] | None = None,
+        retry: RetryPlan | None = None,
     ) -> None:
         # Which MCP servers the vendors may use this session (None: all of them).
         tools.ALLOWED.set(frozenset(tool_servers) if tool_servers is not None else None)
@@ -131,6 +138,7 @@ class Market:
             await run_job(
                 job, stream=self.stream, llm=job_llm or llm, rep=reputation, price_weight=price_weight,
                 guidance=guidance, budget_usd=budget_usd, context=context or None, context_names=context_names or None,
+                retry=retry,
             )
         except Exception as exc:
             logger.exception("job crashed")
@@ -168,9 +176,10 @@ class Market:
 
         asyncio.get_running_loop().create_task(cancel_if_stuck())
 
-    def enqueue(self, message: dict) -> dict:
+    def enqueue(self, message: dict, retry: dict | None = None) -> dict:
         self._queue_seq += 1
         item = {
+            "retry": retry,  # {session_id, task_ids} for a queued retry
             "id": f"q{self._queue_seq}",
             "job": message["job"],
             "price_weight": message.get("price_weight", config.PRICE_WEIGHT),
@@ -192,6 +201,16 @@ class Market:
         """Start the oldest queued session that can still run."""
         while self.queue:
             item = self.queue.pop(0)
+            if item.get("retry"):
+                start, error = _retry_start({"type": "retry_task", **item["retry"]})
+                error = error or limits.status()["message"]
+                if error is None:
+                    self.start(**start)
+                    return
+                logger.warning("dropped queued retry %s: %s", item["id"], error)
+                self.dropped.append({"id": item["id"], "job": item["job"], "reason": error, "t": time.time()})
+                del self.dropped[:-10]
+                continue
             error = _validate_start({"type": "start_job", **item}) or limits.status()["message"]
             if error is not None:
                 logger.warning("dropped queued session %s: %s", item["id"], error)
@@ -486,6 +505,25 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                 note = message["note"].strip()
                 market.guidance.add(message["target"], note)
                 await market.stream.emit("steered", {"target": message["target"], "note": note})
+            elif message_type == "retry_task":
+                start, error = _retry_start(message)
+                if error is None and market.busy:
+                    if message.get("queue") is not True:
+                        error = "a job is already running"
+                    elif len(market.queue) >= MAX_QUEUE:
+                        error = f"the queue is full ({MAX_QUEUE} sessions)"
+                    else:
+                        market.enqueue({"job": start["job"]}, retry={
+                            "session_id": message["session_id"], "task_ids": message["task_ids"],
+                            **({"budget_usd": message["budget_usd"]} if "budget_usd" in message else {}),
+                        })
+                        continue
+                if error is None:
+                    error = limits.status()["message"]
+                if error is not None:
+                    await market.reply_error(ws, error)
+                    continue
+                market.start(**start)
             elif message_type == "stop_job":
                 if not market.busy:
                     await market.reply_error(ws, "no job is running to stop")
@@ -504,6 +542,52 @@ async def websocket_endpoint(ws: WebSocket) -> None:
         pass
     finally:
         market.clients.discard(ws)
+
+
+def _retry_start(message: dict) -> tuple[dict | None, str | None]:
+    """A retry_task message -> keyword arguments for Market.start, or an error.
+
+    {session_id, task_ids: ["t2", ...], budget_usd?}. The job reuses the
+    session's job text, AI, tools and files; only the named tasks go out for
+    bids again, and the rest of its work is kept.
+    """
+    session_id, task_ids = message.get("session_id"), message.get("task_ids")
+    if not isinstance(session_id, str):
+        return None, "retry needs a session_id"
+    if not isinstance(task_ids, list) or not task_ids or not all(isinstance(t, str) for t in task_ids):
+        return None, "retry needs task_ids, like [\"t2\"]"
+    record = sessions.get(session_id)
+    if record is None:
+        return None, "that session isn't saved here"
+    plan = record.get("plan") or []
+    if not plan:
+        return None, "that session was saved before retries existed: use /rerun to run the whole job again"
+    known = {t["task_id"] for t in plan}
+    unknown = [t for t in task_ids if t not in known]
+    if unknown:
+        return None, f"no task {', '.join(unknown)} in that session (it has {', '.join(sorted(known))})"
+    budget = message.get("budget_usd", record.get("budget_usd"))
+    if budget is not None and (isinstance(budget, bool) or not isinstance(budget, (int, float)) or not 0 < budget <= 100):
+        return None, "budget_usd must be more than $0 and at most $100"
+    provider = record.get("provider")
+    if provider not in config.available_providers():
+        provider = None  # its AI has no key any more: use the default
+    ids = [i for i in (record.get("attachment_ids") or []) if attachments.load(i) is not None]
+    retry = RetryPlan(
+        plan=[TaskSpec(**{k: t[k] for k in ("task_id", "type", "title", "brief", "depends_on")}) for t in plan],
+        outputs=dict(record.get("outputs") or {}),
+        redo=list(dict.fromkeys(task_ids)),
+        kept={t["task_id"]: t for t in ((record.get("final") or {}).get("tasks") or [])},
+    )
+    return {
+        "job": record.get("job_text") or "",
+        "price_weight": config.PRICE_WEIGHT,
+        "provider": provider,
+        "budget_usd": budget,
+        "attachment_ids": ids,
+        "tool_servers": record.get("tools"),
+        "retry": (session_id, retry),
+    }, None
 
 
 def _validate_steer(message: dict) -> str | None:

@@ -33,6 +33,7 @@ const HELP: Line[] = [
   ["  /stop                       stop the running job (no new AI calls)", "plain"],
   ["  /queue  /unqueue <n>        jobs typed while one runs wait in line", "plain"],
   ["  /rerun [n]                  run a past session again (/sessions numbers)", "plain"],
+  ["  /retry [t2,t3] [n]          redo just those tasks, keep the rest (none named: the weak ones)", "plain"],
   ["  /price <0-5>                how much price matters (0 = quality only)", "plain"],
   ["  /budget <usd|off>           hard spending cap for your next job", "plain"],
   ["  /ai [name]                  pick the AI for your next job", "plain"],
@@ -45,6 +46,11 @@ const HELP: Line[] = [
   ["  /status  /reset  /clear  /exit", "plain"],
   ["  ↑ ↓ recall earlier lines · Esc closes", "dim"],
 ].map(([text, tone]) => ({ text, tone: tone as Tone }));
+
+/** Tasks worth redoing: unfinished, or graded below what the vendor promised. */
+function weakTasks(tasks: { task_id: string; grade: number | null; promised_quality: number | null }[]): string[] {
+  return tasks.filter((t) => t.grade === null || (t.promised_quality !== null && t.grade < t.promised_quality)).map((t) => t.task_id);
+}
 
 /** One event as terminal lines (the same wording as the Python terminal chat). */
 function describe(ev: AbyssEvent): Line[] {
@@ -97,6 +103,9 @@ function describe(ev: AbyssEvent): Line[] {
         { text: `✅ Done! Your file is ready: ${f.filename}  (/save downloads it, /result shows it)`, tone: "green" },
         ...(f.summary ? [{ text: `   ${f.summary}`, tone: "plain" as Tone }] : []),
         { text: `   mean grade ${f.mean_grade ?? "—"}/10 · total cost $${f.total_cost_usd.toFixed(4)} · ${(f.duration_ms / 1000).toFixed(1)}s`, tone: "dim" },
+        ...(weakTasks(f.tasks).length
+          ? [{ text: `   /retry sends ${weakTasks(f.tasks).map((id) => id.toUpperCase()).join(", ")} out for bids again and keeps the rest`, tone: "yellow" as Tone }]
+          : []),
       ];
     }
     case "error":
@@ -384,6 +393,33 @@ export function CaptainTerminal({ state, onClose, send, providers = [], sessions
         });
         return;
       }
+      case "retry": {
+        if (needLive()) return;
+        // /retry            the latest session's weak tasks
+        // /retry t2,t3      those tasks of the latest session
+        // /retry t2 3       task t2 of session 3 (see /sessions)
+        const parts = rest.split(/\s+/).filter(Boolean);
+        const named = parts.filter((p) => /^t\d+(,t\d+)*$/i.test(p)).flatMap((p) => p.toLowerCase().split(","));
+        const number = parts.find((p) => /^\d+$/.test(p));
+        const s = sessions[(number ? Number(number) : 1) - 1];
+        if (!s) return print({ text: "usage: /retry [t2,t3] [n] (see /sessions; no number = the latest)", tone: "red" });
+        api.session(s.id).then(
+          (record) => {
+            if (!record.plan?.length) return print({ text: "that session was saved before retries existed: /rerun runs the whole job again", tone: "yellow" });
+            const ids = named.length ? named : weakTasks(record.final?.tasks ?? []);
+            if (!ids.length) return print({ text: "every task met its promise: name one to redo anyway, like /retry t2", tone: "dim" });
+            const sent = send!({ type: "retry_task", session_id: s.id, task_ids: ids, ...(running ? { queue: true } : {}) });
+            if (!sent) return print({ text: "couldn't send that: the connection dropped", tone: "red" });
+            const titles = ids.map((id) => {
+              const task = record.plan!.find((p) => p.task_id === id);
+              return task ? `${id.toUpperCase()} (${task.title})` : id.toUpperCase();
+            });
+            print({ text: `${running ? "queued: " : ""}redoing ${titles.join(", ")}; the other tasks keep their work, free`, tone: "dim" });
+          },
+          () => print({ text: "couldn't load that session", tone: "red" }),
+        );
+        return;
+      }
       case "rerun": case "again": {
         if (needLive()) return;
         const s = sessions[(rest ? Number(rest) : 1) - 1];
@@ -410,7 +446,7 @@ export function CaptainTerminal({ state, onClose, send, providers = [], sessions
         if (!sessions.length) return print({ text: "no saved sessions yet", tone: "dim" });
         return print(
           ...sessions.slice(0, 10).map((s, i) => `  ${i + 1}. ${s.job_text.slice(0, 60)}${s.job_text.length > 60 ? "…" : ""}  · $${s.cost_usd.toFixed(4)}${s.mean_grade != null ? ` · ${s.mean_grade}/10` : ""}`),
-          { text: "/open <n> shows one · /rerun <n> runs it again", tone: "dim" },
+          { text: "/open <n> shows one · /rerun <n> runs it again · /retry t2 <n> redoes one task", tone: "dim" },
         );
       case "open": {
         const s = sessions[Number(rest) - 1];
