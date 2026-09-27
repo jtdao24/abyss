@@ -10,6 +10,7 @@
 // gets there. Skipping all of it never changes what MarketScene.render(state) shows.
 import { Container, Graphics, type Sprite, type Text, type Ticker } from "pixi.js";
 
+import { sfx } from "../audio/sfx";
 import type { AbyssEvent, AgentId, TaskType } from "../contract";
 import { AGENT_ORDER } from "./model";
 import { PALETTE, SPENT_POS, text, type MarketScene, type VendorStage } from "./Scene";
@@ -53,6 +54,8 @@ export class Director {
   /** Vendors currently working, and on what kind of task. */
   private readonly working = new Map<AgentId, TaskType>();
   private clock = 0;
+  /** True while a vendor skips ahead: its steps happen at once, so they stay silent. */
+  private settling = false;
 
   constructor(
     private readonly scene: MarketScene,
@@ -106,6 +109,7 @@ export class Director {
             act: () => {
               this.hold(winner, "hand");
               this.setStage(winner, "won");
+              this.sound(() => sfx.won()); // as the scroll lands in the winner's hand, not when the event arrives
               const v = this.scene.vendors[winner];
               this.burst(v.x, v.y - 40, PALETTE.gold, 40);
               this.floatText("GOT IT!", PALETTE.gold, v.x, v.y - 90, 1200, 18);
@@ -125,13 +129,15 @@ export class Director {
             const type = this.taskTypes.get(taskId);
             if (type) this.working.set(agentId, type);
             this.setStage(agentId, "working");
+            this.sound(() => sfx.working());
           },
         });
         break;
       }
       case "done": {
         const agentId = ev.data.agent_id;
-        const coins = Math.max(1, Math.min(14, Math.round(ev.data.usage.cost_usd * 1000)));
+        const cost = Math.round(ev.data.usage.cost_usd * 1000);
+        const coins = Math.max(1, Math.min(14, cost));
         this.handOvers += 1;
         this.scene.refreshBubbles();
         this.plan(
@@ -141,6 +147,7 @@ export class Director {
               this.stopWork(agentId);
               this.hold(agentId, "hand");
               this.setStage(agentId, "done");
+              this.sound(() => sfx.done(cost));
               const home = STALLS[agentId].home;
               for (let i = 0; i < coins; i += 1) this.coin(home.x, home.y - 40, i * 70);
             },
@@ -155,13 +162,13 @@ export class Director {
       case "graded": {
         const agentId = ev.data.agent_id;
         const promised = ev.data.promised_quality;
-        const tone = promised === null || ev.data.grade >= promised ? PALETTE.good
-          : ev.data.grade < promised - 1 ? PALETTE.bad : PALETTE.ok;
+        const verdict = promised === null || ev.data.grade >= promised ? "good" : ev.data.grade < promised - 1 ? "bad" : "ok";
+        const tone = PALETTE[verdict];
         const grade = `${ev.data.grade}/10`;
         // the grade shows once the work is in the reviewer's hands
         this.plan(
           agentId,
-          { act: () => { this.floatText(grade, tone, REVIEWER_POS.x, REVIEWER_POS.y - 100, 1500, 26); this.setStage(agentId, "none"); } },
+          { act: () => { this.floatText(grade, tone, REVIEWER_POS.x, REVIEWER_POS.y - 100, 1500, 26); this.sound(() => sfx.graded(verdict)); this.setStage(agentId, "none"); } },
           { walk: STALLS[agentId].home },
         );
         break;
@@ -232,11 +239,21 @@ export class Director {
   /** Play every queued step instantly: effects happen, the vendor lands where it was going. */
   private settle(agentId: AgentId): void {
     const v = this.scene.vendors[agentId];
-    for (const s of this.scripts[agentId].splice(0)) {
-      if ("act" in s) s.act();
-      else if ("walk" in s) v.position.set(s.walk.x, s.walk.y);
+    this.settling = true;
+    try {
+      for (const s of this.scripts[agentId].splice(0)) {
+        if ("act" in s) s.act();
+        else if ("walk" in s) v.position.set(s.walk.x, s.walk.y);
+      }
+    } finally {
+      this.settling = false;
     }
     resetPose(v);
+  }
+
+  /** A sound that belongs to this moment of the animation. */
+  private sound(play: () => void): void {
+    if (!this.settling) play();
   }
 
   private sendEveryoneHome(): void {
