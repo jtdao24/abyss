@@ -13,8 +13,11 @@ import json
 import logging
 import time
 
+from urllib.parse import urlparse
+
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from . import attachments, config, limits, mcp_admin, tools
 from .contract import validate_event
@@ -28,6 +31,16 @@ from .sessions import SessionStore, usage_summary, vendor_stats
 
 logger = logging.getLogger(__name__)
 app = FastAPI()
+# The market runs on this computer only. Checking the Host header stops DNS
+# rebinding (another site pointing its own name at 127.0.0.1 to read /api/*).
+# "testserver" is Starlette's TestClient.
+LOCAL_HOSTS = ("localhost", "127.0.0.1", "::1", "[::1]")
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=[*LOCAL_HOSTS, "testserver"])
+
+
+def _local_origin(origin: str | None) -> bool:
+    """A browser page on this computer, or no Origin at all (a script, the terminal chat)."""
+    return not origin or urlparse(origin).hostname in LOCAL_HOSTS
 reputation = ReputationStore(config.rep_path())
 llm = LLM()
 
@@ -256,6 +269,7 @@ async def api_usage() -> dict:
 @app.post("/api/attachments")
 async def api_attach(request: Request) -> dict:
     """Add a file ({name, data_base64}) or a link ({url}) as reference material."""
+    _local_only(request)  # otherwise any website could make this computer fetch links
     try:
         body = await request.json()
     except ValueError:
@@ -278,25 +292,17 @@ async def api_vendors() -> dict:
 # ------------------------------------------------------------------ MCP tools
 def _same_machine(request: Request) -> None:
     """Only this computer's pages (by Origin) may change things."""
-    origin = request.headers.get("origin")
-    if origin:
-        from urllib.parse import urlparse
-
-        if urlparse(origin).hostname not in ("localhost", "127.0.0.1", "::1", "[::1]"):
-            raise HTTPException(403, "only this computer can change this")
+    if not _local_origin(request.headers.get("origin")):
+        raise HTTPException(403, "only this computer can change this")
 
 
 def _local_only(request: Request) -> None:
-    """Tool changes can start programs, so only this machine's page may make
-    them: JSON only (no cross-site form posts) and a localhost Origin."""
+    """Changes that start programs or fetch links: JSON only (no cross-site
+    form posts, which skip the browser's preflight) and a localhost Origin."""
     if not request.headers.get("content-type", "").startswith("application/json"):
         raise HTTPException(415, "send JSON")
-    origin = request.headers.get("origin")
-    if origin:
-        from urllib.parse import urlparse
-
-        if urlparse(origin).hostname not in ("localhost", "127.0.0.1", "::1", "[::1]"):
-            raise HTTPException(403, "tool settings can only be changed from this computer")
+    if not _local_origin(request.headers.get("origin")):
+        raise HTTPException(403, "this can only be changed from this computer")
 
 
 async def _json_body(request: Request) -> dict:
@@ -400,12 +406,7 @@ async def api_mcp_update(name: str, request: Request) -> dict:
 
 @app.delete("/api/mcp/servers/{name}")
 async def api_mcp_remove(name: str, request: Request) -> dict:
-    origin = request.headers.get("origin")
-    if origin:
-        from urllib.parse import urlparse
-
-        if urlparse(origin).hostname not in ("localhost", "127.0.0.1", "::1", "[::1]"):
-            raise HTTPException(403, "tool settings can only be changed from this computer")
+    _same_machine(request)
     try:
         mcp_admin.remove(name)
     except mcp_admin.McpConfigError as exc:
@@ -436,6 +437,11 @@ async def api_estimate(provider: str | None = None) -> dict:
 
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket) -> None:
+    # Browsers let any site open a WebSocket to localhost, so check who's asking:
+    # otherwise a page in another tab could watch jobs, start them on your key and use your tools.
+    if not _local_origin(ws.headers.get("origin")):
+        await ws.close(code=1008)
+        return
     await ws.accept()
     await market.join(ws)
     try:
