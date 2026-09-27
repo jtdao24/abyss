@@ -2,6 +2,7 @@
 // market streams its progress back, line by line, like `python -m abyss.chat`.
 import { useEffect, useReducer, useRef, useState, type ReactNode } from "react";
 
+import { sfx } from "../audio/sfx";
 import { api, type Attachment, type McpServer, type Provider, type SessionRecord, type SessionSummary } from "../api";
 import type { AbyssEvent, AgentId, ClientMsg } from "../contract";
 import type { MarketState } from "../state/reducer";
@@ -468,6 +469,7 @@ export function CaptainTerminal({ state, onClose, send, providers = [], sessions
         className="ct-prompt"
         onSubmit={(e) => {
           e.preventDefault();
+          if (input.trim()) (/^\/stop\b/.test(input.trim()) ? sfx.stop : sfx.submit)();
           run(input);
           setInput("");
           setHistoryAt(null);
