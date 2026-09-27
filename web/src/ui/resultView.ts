@@ -78,13 +78,4 @@ export async function copyText(text: string): Promise<boolean> {
   }
 }
 
-/** Job ids the user stopped, read from the event log (Stop's steering note or its error). */
-export function stoppedJobs(log: { type: string; job_id: string | null; data: unknown }[]): Set<string> {
-  const ids = new Set<string>();
-  for (const ev of log) {
-    if (!ev.job_id) continue;
-    const d = ev.data as { note?: string; message?: string };
-    if ((ev.type === "steered" && d.note?.startsWith("Stop:")) || (ev.type === "error" && d.message?.startsWith("stopped by you"))) ids.add(ev.job_id);
-  }
-  return ids;
-}
+

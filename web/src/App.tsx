@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 
 import { installAudioUnlock, isMuted, onMarketEvent, onMutedChange, setMuted, sfx } from "./audio/sfx";
 import { api, type Prices, type Provider, type SessionSummary, type Usage } from "./api";
@@ -8,15 +8,14 @@ import { Director } from "./scene/director";
 import { MarketScene } from "./scene/Scene";
 import type { InteractId } from "./scene/world";
 import { FixtureSource } from "./sources/fixture";
-import type { EventSource } from "./sources/types";
+import type { MarketSource } from "./sources/types";
 import { WsSource } from "./sources/ws";
-import type { MarketState } from "./state/reducer";
+import { isReplay, wasStopped, type MarketState } from "./state/reducer";
 import { store } from "./state/store";
 import { CostCompare } from "./ui/CostCompare";
 import { CostPanel } from "./ui/CostPanel";
-import { McpPanel } from "./ui/McpPanel";
 import { ResultPanel } from "./ui/ResultPanel";
-import { openResult, resultDoc, stoppedJobs } from "./ui/resultView";
+import { openResult, resultDoc } from "./ui/resultView";
 import { SpendMeter } from "./ui/SpendMeter";
 import { GameDialog } from "./ui/GameDialog";
 import { Intro } from "./ui/Intro";
@@ -29,8 +28,22 @@ const SOURCE = params.get("source") === "fixture" ? "fixture" : "ws"; // live by
 const WS_URL = import.meta.env.VITE_WS_URL ?? `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/ws`;
 const parsedSpeed = Number(params.get("speed") || "1");
 const SPEED = SOURCE === "fixture" && Number.isFinite(parsedSpeed) && parsedSpeed > 0 ? parsedSpeed : 1;
+// The Tools panel (and its catalog and logos) loads when you first open it.
+const McpPanel = lazy(() => import("./ui/McpPanel").then((m) => ({ default: m.McpPanel })));
 
-function createSource(): EventSource {
+/** Everyone you can walk up to on the boardwalk, for the keyboard. */
+const PEOPLE: [InteractId, string][] = [
+  ["main", "Captain"],
+  ["tasks", "Tasks"],
+  ["vendor:opus", "Vendor 1"],
+  ["vendor:sonnet", "Vendor 2"],
+  ["vendor:haiku", "Vendor 3"],
+  ["reviewer", "Lifeguard"],
+];
+/** How long after a hello incoming events count as the server's catch-up burst. */
+const CATCH_UP_MS = 400;
+
+function createSource(): MarketSource {
   if (SOURCE === "ws") {
     return new WsSource(WS_URL, (connected) => store.setConnected(connected));
   }
@@ -78,11 +91,21 @@ export default function App() {
   const [showLedger, setShowLedger] = useState(rawLedger || (SOURCE === "ws" && window.innerWidth >= 1280));
   const [showTools, setShowTools] = useState(false);
   const [sceneReady, setSceneReady] = useState(false);
+  const [sceneError, setSceneError] = useState<string | null>(null);
+  // A refusal meant for you ("a job is already running", a spending limit)
+  // shows here when the Captain's terminal isn't open to say it.
+  const [notice, setNotice] = useState<string | null>(null);
   const [providers, setProviders] = useState<Provider[]>([]);
   const [prices, setPrices] = useState<Prices | null>(null);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [usage, setUsage] = useState<Usage | null>(null);
   const [muted, setMutedState] = useState(isMuted());
+
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(null), 6000);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
 
   useEffect(() => {
     installAudioUnlock();
@@ -97,7 +120,7 @@ export default function App() {
     setDialog(id);
     sceneRef.current?.focus(id === "tasks" ? null : id);
   }, []);
-  const sourceRef = useRef<EventSource | null>(null);
+  const sourceRef = useRef<MarketSource | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
   const directorRef = useRef<Director | null>(null);
   const sceneRef = useRef<MarketScene | null>(null);
@@ -121,6 +144,10 @@ export default function App() {
       scene.render(store.getState());
       unsubscribe = store.subscribe(() => scene?.render(store.getState()));
       setSceneReady(true);
+    }).catch((error: unknown) => {
+      if (cancelled) return;
+      console.error("The market scene failed to load", error);
+      setSceneError(error instanceof Error ? error.message : String(error));
     });
     return () => {
       cancelled = true;
@@ -139,10 +166,21 @@ export default function App() {
     const unsubscribe = store.subscribe(() => setState(store.getState()));
     const source = createSource();
     sourceRef.current = source;
+    // Right after a hello the server sends the current (or last) job's events
+    // so far. Events we already had are dropped by the reducer; new ones in
+    // that burst are caught up quietly (no sounds or fanfares).
+    let catchUpUntil = 0;
     source.start((event) => {
+      const replay = isReplay(store.getState(), event);
       store.dispatch(event);
-      directorRef.current?.onEvent(event);
-      onMarketEvent(event);
+      if (event.type === "hello" && SOURCE === "ws") catchUpUntil = performance.now() + CATCH_UP_MS;
+      if (replay) return;
+      if (event.type === "error" && event.job_id === null && !event.data.fatal && dialogRef.current !== "main") {
+        setNotice(event.data.message);
+      }
+      const quiet = event.type !== "hello" && performance.now() < catchUpUntil;
+      directorRef.current?.onEvent(event, quiet);
+      if (!quiet) onMarketEvent(event);
     });
     return () => {
       source.stop();
@@ -152,7 +190,21 @@ export default function App() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") openDialog(null);
+      const typing = e.target instanceof HTMLElement && e.target.closest("input, textarea, select, [contenteditable='true']");
+      if (e.key === "Escape") {
+        // Esc closes the side panel you're in, else the market's panel.
+        const inSide = e.target instanceof HTMLElement && e.target.closest(".cost-panel, .ledger");
+        if (inSide) {
+          setShowLedger(false);
+          setShowTools(false);
+        } else openDialog(null);
+        return;
+      }
+      // C opens the Captain from anywhere you aren't typing.
+      if (!typing && !e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === "c") {
+        e.preventDefault();
+        openDialog("main");
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -190,9 +242,19 @@ export default function App() {
               {badge.label}
             </span>
           </div>
-          <p className="header-hint">Click the Captain on the boat to give a job · click anyone to zoom in</p>
+          <p className="header-hint">Click the Captain on the boat (or press C) to give a job · click anyone to zoom in</p>
           <CostCompare state={state} />
           <div className="header-actions" role="toolbar" aria-label="Panels">
+            <button
+              type="button"
+              className="ledger-toggle captain-toggle"
+              aria-pressed={dialog === "main"}
+              aria-keyshortcuts="C"
+              title="Open the Captain's terminal (C)"
+              onClick={() => openDialog(dialog === "main" ? null : "main")}
+            >
+              Captain
+            </button>
             {SOURCE === "ws" && (
               <button
                 type="button"
@@ -214,7 +276,7 @@ export default function App() {
                 type="button"
                 className="ledger-toggle file-toggle"
                 title={`Open ${lastFile.final.filename ?? "the finished file"}`}
-                onClick={() => openResult(resultDoc(lastFile.final, lastFile.jobText, stoppedJobs(state.log).has(lastFile.jobId)))}
+                onClick={() => openResult(resultDoc(lastFile.final, lastFile.jobText, wasStopped(state, lastFile.jobId)))}
               >
                 File
               </button>
@@ -233,7 +295,32 @@ export default function App() {
         </header>
         <div className="stage-fit">
           <div id="stage" ref={stageRef}>
-            <Intro ready={sceneReady} onDone={() => setIntroDone(true)} />
+            {/* The market is a picture you click. For the keyboard, the same
+                people as buttons, shown when you tab into them. */}
+            <nav className="scene-nav" aria-label="People on the boardwalk">
+              {PEOPLE.map(([id, label]) => (
+                <button key={id} type="button" aria-pressed={dialog === id} onClick={() => openDialog(dialog === id ? null : id)}>
+                  {label}
+                </button>
+              ))}
+            </nav>
+            {sceneError && (
+              <div className="stage-placeholder" role="alert">
+                <span>ABYSS MARKET</span>
+                <small>THE BOARDWALK DIDN'T LOAD</small>
+                <p className="stage-error">{sceneError}</p>
+                <button type="button" className="ledger-toggle" onClick={() => window.location.reload()}>
+                  Try again
+                </button>
+              </div>
+            )}
+            {!sceneError && <Intro ready={sceneReady} onDone={() => setIntroDone(true)} />}
+            {notice && (
+              <div className="market-notice" role="status">
+                <span>{notice}</span>
+                <button type="button" aria-label="Dismiss" onClick={() => setNotice(null)}>×</button>
+              </div>
+            )}
             {dialog && (
               <GameDialog
                 key={dialog}
@@ -249,7 +336,11 @@ export default function App() {
           </div>
         </div>
       </section>
-      {showTools && !showLedger && <McpPanel onClose={() => setShowTools(false)} />}
+      {showTools && !showLedger && (
+        <Suspense fallback={<aside className="cost-panel mcp-panel" aria-label="Tools (MCP servers)" aria-busy="true" />}>
+          <McpPanel onClose={() => setShowTools(false)} />
+        </Suspense>
+      )}
       <ResultPanel />
       {showLedger &&
         (rawLedger || SOURCE !== "ws" ? (

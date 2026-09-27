@@ -1,7 +1,36 @@
-// What the current job cost through the market, and what it would have cost to
-// hand every task straight to the priciest stall's model (no auction).
-import type { AgentId } from "../contract";
+// Money and tokens, in one place: what a job cost, where the spend went, and
+// what it would have cost to hand every task straight to the priciest stall's
+// model (no auction). Every screen that shows a cost formats it here.
+import type { AgentId, StatsData } from "../contract";
+import { AGENT_ORDER } from "../scene/model";
 import type { MarketState } from "./reducer";
+
+export const PURPOSES = ["split", "bid", "work", "review", "assemble"] as const;
+export type PurposeName = (typeof PURPOSES)[number];
+export const PURPOSE_LABEL: Record<PurposeName, string> = {
+  split: "Plan",
+  bid: "Bids",
+  work: "Work",
+  review: "Review",
+  assemble: "Package",
+};
+
+export interface PurposeShare {
+  purpose: PurposeName;
+  cost: number;
+  calls: number;
+  pct: number;
+}
+
+/** Each kind of call's share of the spend. Percentages sum to 100 (or are all 0). */
+export function purposeShares(stats: StatsData): PurposeShare[] {
+  const total = PURPOSES.reduce((sum, p) => sum + (stats.by_purpose[p]?.cost_usd ?? 0), 0);
+  return PURPOSES.map((purpose) => {
+    const bucket = stats.by_purpose[purpose];
+    const cost = bucket?.cost_usd ?? 0;
+    return { purpose, cost, calls: bucket?.calls ?? 0, pct: total > 0 ? (cost / total) * 100 : 0 };
+  });
+}
 
 export interface TopModelComparison {
   /** Display name of the model the baseline uses, e.g. "GPT-5". */
@@ -32,7 +61,7 @@ function priceOf(prices: Prices, model: string, input: number, output: number): 
 /** The stall whose model costs the most per token (the premium tier). */
 function topStall(state: MarketState, prices: Prices): { model: string; name: string } | null {
   let best: { model: string; name: string; rate: number } | null = null;
-  for (const agentId of ["haiku", "sonnet", "opus"] as AgentId[]) {
+  for (const agentId of AGENT_ORDER) {
     const agent = state.agents[agentId];
     if (!agent || !prices[agent.model]) continue;
     const [pin, pout] = prices[agent.model];
@@ -89,8 +118,11 @@ export function formatUsd(usd: number): string {
   return `${sign}$${abs < 1 ? abs.toFixed(4) : abs.toFixed(2)}`;
 }
 
+/** 950, 1.2k, 3.4M. */
 export function formatTokens(n: number): string {
-  return n >= 10_000 ? `${(n / 1000).toFixed(1)}k` : n.toLocaleString("en-US");
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  return String(n);
 }
 
 /** "28% cheaper" / "12% pricier" / "same cost". */

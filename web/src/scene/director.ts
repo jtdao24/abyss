@@ -12,9 +12,10 @@ import { Container, Graphics, type Sprite, type Text, type Ticker } from "pixi.j
 
 import { sfx } from "../audio/sfx";
 import type { AbyssEvent, AgentId, TaskType } from "../contract";
-import { AGENT_ORDER } from "./model";
+import { AGENT_ORDER, verdict } from "./model";
 import { PALETTE, SPENT_POS, text, type MarketScene, type VendorStage } from "./Scene";
 import { MAIN_AGENT_POS, REVIEWER_POS, REVIEW_SPOT, STALLS, WORLD, route, type Point } from "./world";
+import { isStopNote } from "../state/reducer";
 
 const MAX_ACTIVE = 60;    // backlog guard: beyond this, finish every effect instantly
 const WALK_SPEED = 330;   // world px per second at speed 1
@@ -83,10 +84,17 @@ export class Director {
     for (const agentId of AGENT_ORDER) this.stopWork(agentId);
   }
 
-  onEvent(ev: AbyssEvent): void {
+  /**
+   * Play one event. `quiet` is for catching up (a tab that joins mid-job, or
+   * after a reconnect): keep track of who is carrying and working, but skip
+   * the one-off effects (bursts, coins, floating text) so a backlog doesn't
+   * fire every fanfare at once.
+   */
+  onEvent(ev: AbyssEvent, quiet = false): void {
+    const fx = !quiet;
     switch (ev.type) {
       case "job_split":
-        this.floatText("NEW JOB!", PALETTE.gold, MAIN_AGENT_POS.x, MAIN_AGENT_POS.y - 90, 1300, 20);
+        if (fx) this.floatText("NEW JOB!", PALETTE.gold, MAIN_AGENT_POS.x, MAIN_AGENT_POS.y - 90, 1300, 20);
         break;
       case "task_posted":
         this.taskTypes.set(ev.data.task_id, ev.data.type);
@@ -95,7 +103,7 @@ export class Director {
       case "bid":
         if (ev.data.ok) {
           const v = this.scene.vendors[ev.data.agent_id];
-          this.burst(v.x, v.y - 60, PALETTE.paper, 22);
+          if (fx) this.burst(v.x, v.y - 60, PALETTE.paper, 22);
         }
         break;
       case "won": {
@@ -109,6 +117,7 @@ export class Director {
             act: () => {
               this.hold(winner, "hand");
               this.setStage(winner, "won");
+              if (!fx) return; // catching up: no fanfare
               this.sound(() => sfx.won()); // as the scroll lands in the winner's hand, not when the event arrives
               const v = this.scene.vendors[winner];
               this.burst(v.x, v.y - 40, PALETTE.gold, 40);
@@ -129,7 +138,7 @@ export class Director {
             const type = this.taskTypes.get(taskId);
             if (type) this.working.set(agentId, type);
             this.setStage(agentId, "working");
-            this.sound(() => sfx.working());
+            if (fx) this.sound(() => sfx.working());
           },
         });
         break;
@@ -147,6 +156,7 @@ export class Director {
               this.stopWork(agentId);
               this.hold(agentId, "hand");
               this.setStage(agentId, "done");
+              if (!fx) return;
               this.sound(() => sfx.done(cost));
               const home = STALLS[agentId].home;
               for (let i = 0; i < coins; i += 1) this.coin(home.x, home.y - 40, i * 70);
@@ -162,20 +172,27 @@ export class Director {
       case "graded": {
         const agentId = ev.data.agent_id;
         const promised = ev.data.promised_quality;
-        const verdict = promised === null || ev.data.grade >= promised ? "good" : ev.data.grade < promised - 1 ? "bad" : "ok";
-        const tone = PALETTE[verdict];
+        const graded = verdict(ev.data.grade, promised);
+        const tone = PALETTE[graded];
         const grade = `${ev.data.grade}/10`;
         // the grade shows once the work is in the reviewer's hands
         this.plan(
           agentId,
-          { act: () => { this.floatText(grade, tone, REVIEWER_POS.x, REVIEWER_POS.y - 100, 1500, 26); this.sound(() => sfx.graded(verdict)); this.setStage(agentId, "none"); } },
+          {
+            act: () => {
+              this.setStage(agentId, "none");
+              if (!fx) return;
+              this.floatText(grade, tone, REVIEWER_POS.x, REVIEWER_POS.y - 100, 1500, 26);
+              this.sound(() => sfx.graded(graded));
+            },
+          },
           { walk: STALLS[agentId].home },
         );
         break;
       }
       case "rep_update": {
         const delta = ev.data.new - ev.data.old;
-        if (Math.abs(delta) < 0.0005) break;
+        if (!fx || Math.abs(delta) < 0.0005) break;
         const sign = STALLS[ev.data.agent_id].sign;
         const label = `${delta > 0 ? "+" : ""}${delta.toFixed(3)} ${ev.data.task_type.toUpperCase()}`;
         // right after the grade it comes from (which waits for the hand-over), before the walk home
@@ -187,6 +204,7 @@ export class Director {
         break;
       }
       case "error":
+        if (ev.job_id === null && !ev.data.fatal) break; // one connection's refusal, not the market's
         if (ev.data.task_id) {
           for (const agentId of AGENT_ORDER) {
             this.plan(agentId, { act: () => { this.hold(agentId, "none"); this.stopWork(agentId); this.setStage(agentId, "none"); } });
@@ -195,10 +213,10 @@ export class Director {
         if (ev.data.fatal) this.sendEveryoneHome();
         break;
       case "steered":
-        if (ev.job_id && ev.data.note.startsWith("Stop:")) this.stopped.add(ev.job_id);
+        if (ev.job_id && ev.data.target === "job" && isStopNote(ev.data.note)) this.stopped.add(ev.job_id);
         break;
       case "final":
-        this.floatText(
+        if (fx) this.floatText(
           ev.job_id && this.stopped.has(ev.job_id) ? "JOB STOPPED" : ev.data.status === "ok" ? "JOB DONE!" : `JOB ${ev.data.status.toUpperCase()}`,
           PALETTE.gold, WORLD.w / 2, WORLD.h / 2, 2200, 48);
         this.sendEveryoneHome();

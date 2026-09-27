@@ -2,7 +2,7 @@
 // Scene.ts only draws this; nothing here touches Pixi, so it is unit-testable.
 import { THEME } from "../theme";
 import type { AgentId, TaskType } from "../contract";
-import type { AgentStatus, MarketState, TaskStatus, TaskView } from "../state/reducer";
+import { wasStopped, type AgentStatus, type MarketState, type TaskStatus, type TaskView } from "../state/reducer";
 
 export const AGENT_ORDER: AgentId[] = ["haiku", "sonnet", "opus"];
 export const TASK_TYPES: TaskType[] = ["research", "writing", "checking"];
@@ -18,6 +18,22 @@ export const VENDOR: Record<AgentId, { name: string; tier: string; color: string
 
 export type BubbleTone = "thinking" | "bid" | "pass" | "won" | "working" | "done";
 export type ReviewTone = "good" | "ok" | "bad";
+
+/** "Vendor 1": a stall's name in a sentence. */
+export const vendorTitle = (agentId: AgentId): string => VENDOR[agentId].name.replace("VENDOR", "Vendor");
+
+/** A grade against its promise: met it, missed by one, or missed by more. */
+export function verdict(grade: number, promised: number | null): ReviewTone {
+  if (promised === null || grade >= promised) return "good";
+  return grade < promised - 1 ? "bad" : "ok";
+}
+
+/** The AI's name as the page shows it ("meta" runs Muse Spark). */
+export function providerLabel(provider: string | null | undefined): string {
+  if (provider === "meta") return "Muse";
+  if (provider === "openai") return "OpenAI";
+  return provider ?? "—";
+}
 
 export interface StallModel {
   agentId: AgentId;
@@ -131,13 +147,14 @@ export function sceneModel(state: MarketState): SceneModel {
     };
   });
 
+  // The lifeguard shows the latest grade while the job runs; once it's over
+  // the final banner has the job's grade, so the bubble goes.
   let review: SceneModel["review"] = null;
-  for (let i = state.taskOrder.length - 1; i >= 0; i -= 1) {
+  for (let i = state.final ? -1 : state.taskOrder.length - 1; i >= 0; i -= 1) {
     const graded = state.tasks[state.taskOrder[i]];
     if (graded?.grade == null) continue;
     const promised = graded.winner ? graded.bids[graded.winner]?.promised_quality ?? null : null;
-    const tone: ReviewTone =
-      promised === null || graded.grade >= promised ? "good" : graded.grade < promised - 1 ? "bad" : "ok";
+    const tone = verdict(graded.grade, promised);
     review = { text: `${graded.task_id.toUpperCase()} ${graded.grade}/10`, tone };
     break;
   }
@@ -149,7 +166,7 @@ export function sceneModel(state: MarketState): SceneModel {
       : "WAITING FOR A JOB";
 
   const total = state.final?.total_cost_usd ?? state.stats?.total_cost_usd ?? 0;
-  const stopped = state.steering.some((s) => s.jobId === state.currentJob?.jobId && s.target === "job" && s.note.startsWith("Stop:"));
+  const stopped = wasStopped(state, state.currentJob?.jobId);
   const finalBanner = state.final
     ? `JOB ${stopped ? "STOPPED" : state.final.status.toUpperCase()} - GRADE ${state.final.mean_grade ?? "-"} - $${state.final.total_cost_usd.toFixed(4)}`
     : null;

@@ -101,7 +101,7 @@ The market shows vendor names, not models. The table above says which model runs
 - **Per job:** `/budget` sets a hard cap. The crew stops starting AI calls when it runs out.
 - **Per day, week and month:** click the spend meter in the bottom-right corner to set limits. At 80% the page warns you; at 100% new sessions are refused and a running one is capped to what's left.
 - **Right now:** `/stop` ends the running job.
-- **Costs:** the **Costs** button in the header shows what each session cost and what the premium vendor alone would have cost.
+- **Costs:** the **Costs** button in the header shows what each session cost and what the premium vendor alone would have cost. That comparison is an estimate: the same work tokens at the premium model's rates, the same planning, review and packaging, and no bids (a single vendor needs no auction).
 
 The speaker button in the header turns the 8-bit sound effects on or off (remembered per browser).
 

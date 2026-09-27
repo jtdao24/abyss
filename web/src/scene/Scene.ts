@@ -46,7 +46,10 @@ const HEAD = 84;          // bubble height above a person's feet
 const MAX_ZOOM = 3;       // focus never zooms past this multiple of the fitted view
 const PANEL_SHARE = 0.42; // bottom share of the stage covered by the focus panel
 /** ?calm=1 turns off the rippling water and swaying leaves (for slow machines). */
-const CALM = new URLSearchParams(window.location.search).get("calm") === "1";
+/** Also on when the system asks for less motion. */
+const CALM =
+  new URLSearchParams(window.location.search).get("calm") === "1" ||
+  (typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
 
 export const PALETTE = {
   ink: THEME.inkDark,
@@ -163,6 +166,8 @@ export class MarketScene {
   private readonly hover = new Graphics();
   private hoverLabel!: Text;
   private hovered: Interactable | "tasks" | null = null;
+  /** The latest pointer position, handled once per frame (pointermove fires far more often). */
+  private pendingHover: Point | null = null;
   private readonly clickRing = new Graphics();
   private clickAge = Infinity;
   private walk: Point[] = [];
@@ -238,6 +243,11 @@ export class MarketScene {
     scene.build(backdrop, people);
     el.appendChild(app.canvas);
     app.canvas.classList.add("market-canvas");
+    app.canvas.setAttribute("role", "img");
+    app.canvas.setAttribute(
+      "aria-label",
+      "The boardwalk market: the Captain on the boat, three vendor stalls and the lifeguard. Use the Captain button or the list of people to open their panels.",
+    );
     scene.resizeObserver = new ResizeObserver(() => scene.fit());
     scene.resizeObserver.observe(el);
     scene.fit();
@@ -272,7 +282,10 @@ export class MarketScene {
     this.stopWatchdog();
     this.resizeObserver?.disconnect();
     this.app.ticker.remove(this.tick);
-    this.app.destroy(true, { children: true });
+    // The ripples own canvas textures and filters Pixi doesn't know to free:
+    // unbind them first, or Pixi warns about textures destroyed while bound.
+    this.ambient?.destroy();
+    this.app.destroy(true, { children: true, texture: true, textureSource: true });
   }
 
   /** Walk the player somewhere; `then` runs on arrival (a new click cancels it). */
@@ -333,6 +346,14 @@ export class MarketScene {
     this.base = fitted;
     this.camTarget = this.cameraFor(this.focused);
     if (this.focused === null) this.cam = { ...this.base };
+    // A resize clears the canvas. Draw now, inside the ResizeObserver callback
+    // (before the browser paints), or the page shows one blank frame.
+    this.stepCamera(0);
+    try {
+      this.app.render();
+    } catch {
+      /* the guarded frame loop reports render errors; the next tick retries */
+    }
   }
 
   private cameraFor(id: InteractId | null): { scale: number; x: number; y: number } {
@@ -411,7 +432,7 @@ export class MarketScene {
     this.world.eventMode = "static";
     this.world.hitArea = new Rectangle(0, 0, WORLD.w, WORLD.h);
     this.world.on("pointertap", (e: FederatedPointerEvent) => this.click(this.world.toLocal(e.global)));
-    this.world.on("pointermove", (e: FederatedPointerEvent) => this.setHover(this.world.toLocal(e.global)));
+    this.world.on("pointermove", (e: FederatedPointerEvent) => (this.pendingHover = this.world.toLocal(e.global)));
     this.app.ticker.add(this.tick);
   }
 
@@ -456,7 +477,10 @@ export class MarketScene {
     }
     const thing = hitTest(p, this.vendorPositions());
     const dest = standable(thing ? thing.approach : p);
-    this.walkTo(dest, thing ? () => this.onInteract(thing.id) : null);
+    // The panel opens right away; the player still walks over. (Waiting for
+    // the walk took seconds from across the pier, with no sign anything happened.)
+    this.walkTo(dest);
+    if (thing) this.onInteract(thing.id);
     if (!thing) {
       sfx.click();
       this.onGround();
@@ -473,7 +497,10 @@ export class MarketScene {
   private setHover(p: Point): void {
     // Vendors move, so their box is rebuilt on every call (and the outline follows them).
     const thing = inPanel(p) ? "tasks" : hitTest(p, this.vendorPositions());
-    if (thing === this.hovered) return;
+    const id = (t: typeof thing) => (t === null ? null : t === "tasks" ? "tasks" : t.id);
+    // Same person, same spot: nothing to redraw. (A vendor's box is a new
+    // object each call, so compare who it is and where, not the object.)
+    if (id(thing) === id(this.hovered) && (thing === null || thing === "tasks" || this.hovered === null || this.hovered === "tasks" || thing.hit.join() === this.hovered.hit.join())) return;
     this.hovered = thing;
     this.app.canvas.style.cursor = thing ? "pointer" : "default";
     this.hover.clear();
@@ -489,6 +516,10 @@ export class MarketScene {
   private readonly tick = (ticker: Ticker): void => {
     this.clock += ticker.deltaMS;
     this.stepCamera(ticker.deltaMS);
+    if (this.pendingHover) {
+      this.setHover(this.pendingHover);
+      this.pendingHover = null;
+    }
     this.ambient.update(ticker);
     this.stepPlayer(ticker.deltaMS);
     // the main agent rides the boat's gentle bob

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { sfx } from "../audio/sfx";
 import { api, type LimitPeriod, type LimitsStatus } from "../api";
+import { usePolling } from "./usePolling";
 
 const SHORT: Record<LimitPeriod["period"], string> = { day: "Today", week: "Week", month: "Month" };
 const money = (v: number) => (v < 10 ? `$${v.toFixed(2)}` : `$${v.toFixed(0)}`);
@@ -18,13 +19,9 @@ export function SpendMeter({ refreshKey }: { refreshKey: unknown }) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
+  const pill = useRef<HTMLButtonElement | null>(null);
 
-  useEffect(() => {
-    const load = () => api.limits().then(setStatus).catch(() => undefined);
-    void load();
-    const timer = window.setInterval(load, 5000);
-    return () => window.clearInterval(timer);
-  }, [refreshKey]);
+  usePolling(() => void api.limits().then(setStatus).catch(() => undefined), 5000, [refreshKey]);
 
   // Alarm once when spending crosses a limit (not on load if already over).
   const wasOver = useRef<boolean | null>(null);
@@ -63,17 +60,25 @@ export function SpendMeter({ refreshKey }: { refreshKey: unknown }) {
       {open && (
         <form
           className="spend-pop"
+          aria-label="Spending limits"
+          onKeyDown={(e) => {
+            if (e.key !== "Escape") return;
+            e.stopPropagation(); // just this popover, not the market's panel
+            setOpen(false);
+            pill.current?.focus();
+          }}
           onSubmit={(e) => {
             e.preventDefault();
             void save();
           }}
         >
           <strong>Spending limits</strong>
-          {status.periods.map((p) => (
+          {status.periods.map((p, i) => (
             <label key={p.period}>
               <span>{SHORT[p.period]}</span>
               <small>{money(p.spent)} spent</small>
               <input
+                autoFocus={i === 0}
                 inputMode="decimal"
                 placeholder="no limit"
                 value={draft[p.period] ?? ""}
@@ -87,6 +92,7 @@ export function SpendMeter({ refreshKey }: { refreshKey: unknown }) {
         </form>
       )}
       <button
+        ref={pill}
         type="button"
         className={`spend-pill ${tone}`}
         onClick={openEditor}
