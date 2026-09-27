@@ -28,15 +28,20 @@ def _safe_id(job_id: str) -> bool:
 class SessionStore:
     def __init__(self, directory: Path | None = None) -> None:
         self.directory = directory or sessions_dir()
-        # (job text, provider, budget, attachment names) until the job's job_split names it
-        self._pending: tuple[str, str | None, float | None, list[str]] | None = None
+        # (job text, provider, budget, attachment names, tool servers) until the job's job_split names it
+        self._pending: tuple[str, str | None, float | None, list[str], list[str] | None] | None = None
 
     # ------------------------------------------------------------- writing
     def expect(
-        self, job_text: str, provider: str | None, budget_usd: float | None = None, attachments: list[str] | None = None
+        self,
+        job_text: str,
+        provider: str | None,
+        budget_usd: float | None = None,
+        attachments: list[str] | None = None,
+        tools: list[str] | None = None,
     ) -> None:
         """The market is about to start this job; its job_id arrives with job_split."""
-        self._pending = (job_text, provider, budget_usd, list(attachments or []))
+        self._pending = (job_text, provider, budget_usd, list(attachments or []), tools)
 
     def observe(self, event: dict) -> None:
         job_id = event.get("job_id")
@@ -45,7 +50,7 @@ class SessionStore:
             return
         try:
             if kind == "job_split":
-                text, provider, budget, attached = self._pending or ("", None, None, [])
+                text, provider, budget, attached, tool_servers = self._pending or ("", None, None, [], None)
                 self._pending = None
                 self._write(job_id, {
                     "id": job_id,
@@ -53,6 +58,7 @@ class SessionStore:
                     "provider": provider or config.provider(),
                     "budget_usd": budget,
                     "attachments": attached,
+                    "tools": tool_servers,  # MCP servers allowed (None: all)
                     "bids": {},          # agent -> bids actually placed
                     "rep_updates": [],   # every reputation change, in order
                     "status": "running",

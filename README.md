@@ -48,6 +48,25 @@ Every call's tokens and cost are recorded in the ledger (`runs/ledger.jsonl`). C
 
 Other flags: `--port` if 8000 is taken, `--no-browser`, `--chat` to also run the terminal chat, and `--dev` for the hot-reloading dev server.
 
+## Tools (MCP)
+
+Vendors can call MCP tools while they work: read web pages, search, drive a
+browser, post to Slack, open GitHub issues, query a database, and so on.
+Click **Tools** in the header to:
+
+- add a server from the catalog in one click (Fetch, Playwright, Context7,
+  Filesystem, Git, SQLite, Memory, Brave, Tavily, Exa, Firecrawl, GitHub,
+  Slack, Discord, Notion, Airtable, Postgres, Supabase, HubSpot, Google Maps,
+  Stripe, ...), or any other MCP server by command or URL;
+- paste the keys a server needs. They are saved to `backend/.env` only;
+  `mcp.json` (gitignored) keeps `${VAR}` references;
+- see each server's status and tools, turn single tools off, and watch the
+  vendors' recent tool calls.
+
+When you start a session, the Captain lets you pick which servers the vendors
+may use. Local servers need Node.js (`npx`) or uv (`uvx`). Tool rounds are
+billed like any other call and count toward the budget cap.
+
 ## The chat
 
 | command | |

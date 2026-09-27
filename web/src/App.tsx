@@ -13,6 +13,7 @@ import type { MarketState } from "./state/reducer";
 import { store } from "./state/store";
 import { CostCompare } from "./ui/CostCompare";
 import { CostPanel } from "./ui/CostPanel";
+import { McpPanel } from "./ui/McpPanel";
 import { GameDialog } from "./ui/GameDialog";
 import { Ledger } from "./ui/Ledger";
 
@@ -57,6 +58,7 @@ export default function App() {
   // ?ledger=1 shows the raw call ledger; otherwise the right drawer is the cost dashboard.
   const rawLedger = params.get("ledger") === "1";
   const [showLedger, setShowLedger] = useState(rawLedger || (SOURCE === "ws" && window.innerWidth >= 1280));
+  const [showTools, setShowTools] = useState(false);
   const [sceneReady, setSceneReady] = useState(false);
   const [providers, setProviders] = useState<Provider[]>([]);
   const [prices, setPrices] = useState<Prices | null>(null);
@@ -144,7 +146,7 @@ export default function App() {
   const badge = modeBadge(state);
 
   return (
-    <main className={`app-shell ${showLedger ? "" : "ledger-hidden"}`}>
+    <main className={`app-shell ${showLedger || showTools ? "" : "ledger-hidden"}`}>
       <section className="stage-shell" aria-label="Abyss boardwalk market">
         <header className="stage-header">
           <div className="title">
@@ -152,8 +154,21 @@ export default function App() {
             <small>Click the Captain on the boat to start a session. Click anyone else to zoom in and watch.</small>
           </div>
           <div className="header-actions">
+            {SOURCE === "ws" && (
+              <button
+                type="button"
+                className="ledger-toggle"
+                aria-pressed={showTools}
+                onClick={() => {
+                  setShowTools((v) => !v);
+                  setShowLedger(false);
+                }}
+              >
+                {showTools ? "Hide tools" : "Tools"}
+              </button>
+            )}
             <CostCompare state={state} />
-            <button type="button" className="ledger-toggle" onClick={() => setShowLedger((v) => !v)}>
+            <button type="button" className="ledger-toggle" onClick={() => { setShowLedger((v) => !v); setShowTools(false); }}>
               {showLedger ? (rawLedger ? "Hide ledger" : "Hide costs") : rawLedger ? "Show ledger" : "Costs"}
             </button>
             <span className={`mode-badge ${badge.tone}`}>{badge.label}</span>
@@ -179,6 +194,7 @@ export default function App() {
           )}
         </div>
       </section>
+      {showTools && !showLedger && <McpPanel onClose={() => setShowTools(false)} />}
       {showLedger &&
         (rawLedger || SOURCE !== "ws" ? (
           <Ledger state={state} />

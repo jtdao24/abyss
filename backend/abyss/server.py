@@ -15,7 +15,7 @@ import logging
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 
-from . import attachments, config
+from . import attachments, config, mcp_admin, tools
 from .contract import validate_event
 from .events import EventStream, hello_data
 from .llm import LLM
@@ -57,6 +57,7 @@ class Market:
         # Joining (hello + catch-up) and broadcasting take turns, so a viewer that
         # joins mid-job neither misses an event nor sees one out of order.
         self.lock = asyncio.Lock()
+        self.tools_changed = False  # mcp.json changed mid-session: reload when it ends
 
     @property
     def busy(self) -> bool:
@@ -93,13 +94,14 @@ class Market:
         provider: str | None = None,
         budget_usd: float | None = None,
         attachment_ids: list[str] | None = None,
+        tool_servers: list[str] | None = None,
     ) -> None:
         self.backlog = []
         self.guidance = Guidance()
         context, names = attachments.context_for(attachment_ids or [])
-        sessions.expect(job, provider, budget_usd, names)
+        sessions.expect(job, provider, budget_usd, names, tool_servers)
         self.running = asyncio.create_task(
-            self._run(job, price_weight, self.guidance, llm_for(provider), budget_usd, context, names)
+            self._run(job, price_weight, self.guidance, llm_for(provider), budget_usd, context, names, tool_servers)
         )
 
     async def _run(
@@ -111,7 +113,10 @@ class Market:
         budget_usd: float | None = None,
         context: str | None = None,
         context_names: list[str] | None = None,
+        tool_servers: list[str] | None = None,
     ) -> None:
+        # Which MCP servers the vendors may use this session (None: all of them).
+        tools.ALLOWED.set(frozenset(tool_servers) if tool_servers is not None else None)
         # A crashed job must tell everyone instead of leaving them waiting forever.
         try:
             await run_job(
@@ -124,6 +129,11 @@ class Market:
                 await self.stream.emit(
                     "error", {"message": f"internal error: {exc}", "task_id": None, "fatal": True}, job_id=None
                 )
+        finally:
+            if self.tools_changed:  # the Tools panel changed mcp.json mid-session
+                self.tools_changed = False
+                with contextlib.suppress(Exception):
+                    await tools.shared().reload()
 
 
 market = Market()
@@ -197,6 +207,111 @@ async def api_vendors() -> dict:
     return vendor_stats(sessions, reputation.snapshot())
 
 
+# ------------------------------------------------------------------ MCP tools
+def _local_only(request: Request) -> None:
+    """Tool changes can start programs, so only this machine's page may make
+    them: JSON only (no cross-site form posts) and a localhost Origin."""
+    if not request.headers.get("content-type", "").startswith("application/json"):
+        raise HTTPException(415, "send JSON")
+    origin = request.headers.get("origin")
+    if origin:
+        from urllib.parse import urlparse
+
+        if urlparse(origin).hostname not in ("localhost", "127.0.0.1", "::1", "[::1]"):
+            raise HTTPException(403, "tool settings can only be changed from this computer")
+
+
+async def _json_body(request: Request) -> dict:
+    _local_only(request)
+    try:
+        body = await request.json()
+    except ValueError:
+        raise HTTPException(400, "send a JSON object")
+    if not isinstance(body, dict):
+        raise HTTPException(400, "send a JSON object")
+    return body
+
+
+async def _apply_tool_changes() -> None:
+    if market.busy:
+        market.tools_changed = True  # reload when this session ends
+    else:
+        await tools.shared().reload()
+
+
+def _tools_view() -> dict:
+    hub = tools.shared()
+    return mcp_admin.overview(hub.status(), hub.activity(), hub.config_error, market.tools_changed)
+
+
+@app.get("/api/mcp")
+async def api_mcp() -> dict:
+    """MCP servers, their status and tools, the catalog, and recent tool calls."""
+    hub = tools.shared()
+    if not hub._loaded:
+        await hub.reload()
+    return _tools_view()
+
+
+@app.post("/api/mcp/servers")
+async def api_mcp_add(request: Request) -> dict:
+    """Add a server: {catalog_id, name?, params?, secrets?} or {name, custom: {command, args, env} | {url, headers}}."""
+    body = await _json_body(request)
+    try:
+        if body.get("catalog_id"):
+            mcp_admin.add_from_catalog(body["catalog_id"], body.get("name"), body.get("params"), body.get("secrets"))
+        else:
+            mcp_admin.add_custom(body.get("name", ""), body.get("custom") or {}, body.get("secrets"))
+    except mcp_admin.McpConfigError as exc:
+        raise HTTPException(400, str(exc))
+    await _apply_tool_changes()
+    return _tools_view()
+
+
+@app.post("/api/mcp/servers/{name}")
+async def api_mcp_update(name: str, request: Request) -> dict:
+    """Change a server: {disabled?, secrets?, allow?}."""
+    body = await _json_body(request)
+    try:
+        mcp_admin.update(
+            name, disabled=body.get("disabled"), secrets=body.get("secrets"), allow=body.get("allow", False)
+        )
+    except mcp_admin.McpConfigError as exc:
+        raise HTTPException(400, str(exc))
+    await _apply_tool_changes()
+    return _tools_view()
+
+
+@app.delete("/api/mcp/servers/{name}")
+async def api_mcp_remove(name: str, request: Request) -> dict:
+    origin = request.headers.get("origin")
+    if origin:
+        from urllib.parse import urlparse
+
+        if urlparse(origin).hostname not in ("localhost", "127.0.0.1", "::1", "[::1]"):
+            raise HTTPException(403, "tool settings can only be changed from this computer")
+    try:
+        mcp_admin.remove(name)
+    except mcp_admin.McpConfigError as exc:
+        raise HTTPException(400, str(exc))
+    await _apply_tool_changes()
+    return _tools_view()
+
+
+@app.post("/api/mcp/reload")
+async def api_mcp_reload(request: Request) -> dict:
+    """Restart every server (after installing Node.js or uv, say)."""
+    await _json_body(request)
+    await _apply_tool_changes()
+    return _tools_view()
+
+
+@app.on_event("shutdown")
+async def _close_tools() -> None:
+    with contextlib.suppress(Exception):
+        await tools.shared().close()
+
+
 @app.get("/api/estimate")
 async def api_estimate(provider: str | None = None) -> dict:
     """What a typical session will cost on this AI, before starting it (no calls)."""
@@ -231,6 +346,7 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                     message.get("provider"),
                     message.get("budget_usd"),
                     message.get("attachments"),
+                    message.get("tools"),
                 )
             elif message_type == "steer":
                 error = _validate_steer(message)
@@ -290,6 +406,11 @@ def _validate_start(message: dict) -> str | None:
             return f"attachments must be a list of at most {attachments.MAX_ATTACHMENTS} ids"
         if any(not isinstance(i, str) or attachments.load(i) is None for i in ids):
             return "an attachment is missing; add the file or link again"
+    servers = message.get("tools")
+    if servers is not None and (
+        not isinstance(servers, list) or len(servers) > 50 or not all(isinstance(s, str) for s in servers)
+    ):
+        return "tools must be a list of MCP server names"
     return None
 
 

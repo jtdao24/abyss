@@ -95,6 +95,54 @@ export interface VendorStats {
   history: Record<string, { job_id: string; t: number | null; value: number; ratio: number }[]>;
 }
 
+export interface McpServer {
+  name: string;
+  catalog: string | null;
+  label: string;
+  kind: "local" | "remote";
+  target: string;
+  /** starting | ready | failed | disabled | needs_keys | stopped */
+  state: string;
+  error: string | null;
+  tools: { name: string; description: string }[];
+  allow: string[] | null;
+  keys: { var: string; set: boolean }[];
+  missing: string[];
+}
+
+export interface McpCatalogEntry {
+  id: string;
+  label: string;
+  category: string;
+  description: string;
+  runtime: "npx" | "uvx" | null;
+  params: { key: string; label: string; placeholder: string }[];
+  secrets: { var: string; label: string; url: string; set: boolean }[];
+  added: boolean;
+}
+
+export interface McpActivity {
+  t: number;
+  server: string;
+  tool: string;
+  agent_id: string | null;
+  task_id: string | null;
+  ok: boolean;
+  ms: number;
+  args: string;
+  result: string;
+}
+
+export interface McpOverview {
+  servers: McpServer[];
+  catalog: McpCatalogEntry[];
+  runtimes: { npx: boolean; uvx: boolean };
+  activity: McpActivity[];
+  config_error: string | null;
+  pending_reload: boolean;
+  config_file: string;
+}
+
 async function postJson<T>(path: string, body: unknown): Promise<T> {
   const response = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   const data = await response.json().catch(() => ({}));
@@ -127,6 +175,23 @@ export const api = {
   attachFile: async (file: File) => postJson<Attachment>("/api/attachments", { name: file.name, data_base64: await fileToBase64(file) }),
   attachLink: (url: string) => postJson<Attachment>("/api/attachments", { url }),
   vendors: () => getJson<{ vendors: Record<string, VendorStats>; sessions: number }>("/api/vendors"),
+  mcp: () => getJson<McpOverview>("/api/mcp"),
+  mcpAdd: (body: {
+    catalog_id?: string;
+    name?: string;
+    params?: Record<string, string>;
+    secrets?: Record<string, string>;
+    custom?: { command?: string; args?: string[]; env?: Record<string, string>; url?: string; headers?: Record<string, string> };
+  }) => postJson<McpOverview>("/api/mcp/servers", body),
+  mcpUpdate: (name: string, body: { disabled?: boolean; secrets?: Record<string, string>; allow?: string[] | null }) =>
+    postJson<McpOverview>(`/api/mcp/servers/${encodeURIComponent(name)}`, body),
+  mcpRemove: async (name: string) => {
+    const response = await fetch(`/api/mcp/servers/${encodeURIComponent(name)}`, { method: "DELETE" });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(typeof data?.detail === "string" ? data.detail : `request failed (${response.status})`);
+    return data as McpOverview;
+  },
+  mcpReload: () => postJson<McpOverview>("/api/mcp/reload", {}),
   estimate: (provider: string | null) =>
     getJson<Estimate>(`/api/estimate${provider ? `?provider=${encodeURIComponent(provider)}` : ""}`),
 };
