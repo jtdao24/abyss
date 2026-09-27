@@ -19,6 +19,7 @@ import { ResultPanel } from "./ui/ResultPanel";
 import { openResult, resultDoc, stoppedJobs } from "./ui/resultView";
 import { SpendMeter } from "./ui/SpendMeter";
 import { GameDialog } from "./ui/GameDialog";
+import { Intro } from "./ui/Intro";
 import { Ledger } from "./ui/Ledger";
 
 const params = new URLSearchParams(window.location.search);
@@ -130,7 +131,11 @@ export default function App() {
     };
   }, []);
 
+  // A replay waits for the intro to finish so its opening isn't hidden behind it.
+  const [introDone, setIntroDone] = useState(false);
+  const startSource = SOURCE !== "fixture" || introDone;
   useEffect(() => {
+    if (!startSource) return;
     const unsubscribe = store.subscribe(() => setState(store.getState()));
     const source = createSource();
     sourceRef.current = source;
@@ -143,7 +148,7 @@ export default function App() {
       source.stop();
       unsubscribe();
     };
-  }, []);
+  }, [startSource]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -228,12 +233,7 @@ export default function App() {
         </header>
         <div className="stage-fit">
           <div id="stage" ref={stageRef}>
-            {!sceneReady && (
-              <div className="stage-placeholder">
-                <span>ABYSS MARKET</span>
-                <small>SETTING UP THE BOARDWALK</small>
-              </div>
-            )}
+            <Intro ready={sceneReady} onDone={() => setIntroDone(true)} />
             {dialog && (
               <GameDialog
                 key={dialog}
