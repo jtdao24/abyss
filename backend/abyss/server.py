@@ -15,7 +15,7 @@ import logging
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 
-from . import attachments, config, mcp_admin, tools
+from . import attachments, config, limits, mcp_admin, tools
 from .contract import validate_event
 from .events import EventStream, hello_data
 from .llm import LLM
@@ -101,7 +101,11 @@ class Market:
         context, names = attachments.context_for(attachment_ids or [])
         sessions.expect(job, provider, budget_usd, names, tool_servers)
         self.running = asyncio.create_task(
-            self._run(job, price_weight, self.guidance, llm_for(provider), budget_usd, context, names, tool_servers)
+            self._run(
+                job, price_weight, self.guidance, llm_for(provider),
+                limits.job_budget(budget_usd),  # the spending limits cap this job too
+                context, names, tool_servers,
+            )
         )
 
     async def _run(
@@ -244,6 +248,24 @@ def _tools_view() -> dict:
     return mcp_admin.overview(hub.status(), hub.activity(), hub.config_error, market.tools_changed)
 
 
+# ------------------------------------------------------------------ spending limits
+@app.get("/api/limits")
+async def api_limits() -> dict:
+    """Spend today / this week / this month against the limits."""
+    return limits.status()
+
+
+@app.post("/api/limits")
+async def api_set_limits(request: Request) -> dict:
+    """Set limits: {day?, week?, month?} in dollars, null to clear."""
+    body = await _json_body(request)
+    try:
+        limits.save(body)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    return limits.status()
+
+
 @app.get("/api/mcp")
 async def api_mcp() -> dict:
     """MCP servers, their status and tools, the catalog, and recent tool calls."""
@@ -337,6 +359,8 @@ async def websocket_endpoint(ws: WebSocket) -> None:
             message_type = message.get("type")
             if message_type == "start_job":
                 error = "a job is already running" if market.busy else _validate_start(message)
+                if error is None:
+                    error = limits.status()["message"]  # a spending limit is used up
                 if error is not None:
                     await market.reply_error(ws, error)
                     continue

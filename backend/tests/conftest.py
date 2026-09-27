@@ -10,6 +10,8 @@ import pytest
 os.environ["ABYSS_NO_DOTENV"] = "1"
 # ...nor start a developer's MCP servers (mcp.json).
 os.environ["ABYSS_MCP_CONFIG"] = str(Path(__file__).parent / "no-mcp.json")
+# ...nor a developer's spending limits.
+os.environ["ABYSS_LIMITS_PATH"] = str(Path(__file__).parent / "no-limits.json")
 # Tests default to OpenAI; the Meta tests pick their provider explicitly.
 os.environ["ABYSS_PROVIDER"] = "openai"
 # The app runs real models per tier by default; the tests assume cheap test mode

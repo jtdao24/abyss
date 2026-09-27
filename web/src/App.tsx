@@ -14,6 +14,7 @@ import { store } from "./state/store";
 import { CostCompare } from "./ui/CostCompare";
 import { CostPanel } from "./ui/CostPanel";
 import { McpPanel } from "./ui/McpPanel";
+import { SpendMeter } from "./ui/SpendMeter";
 import { GameDialog } from "./ui/GameDialog";
 import { Ledger } from "./ui/Ledger";
 
@@ -192,6 +193,7 @@ export default function App() {
               sessions={sessions}
             />
           )}
+          {SOURCE === "ws" && <SpendMeter refreshKey={`${jobId}-${state.history.length}`} />}
         </div>
       </section>
       {showTools && !showLedger && <McpPanel onClose={() => setShowTools(false)} />}
