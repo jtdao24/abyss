@@ -149,6 +149,8 @@ class Bubble extends Container {
 export class MarketScene {
   readonly app: Application;
   readonly world = new Container();
+  /** Screen-fixed scene UI, unaffected by camera cropping and focus zooms. */
+  readonly ui = new Container();
   /** People, sorted by y so nearer ones overlap farther ones. */
   readonly actors = new Container();
   /** Effects layer for director.ts, above people and bubbles. */
@@ -168,13 +170,14 @@ export class MarketScene {
   private readonly mainBubble = new Bubble(13);
   private readonly reviewBubble = new Bubble(15);
   private readonly cards: { bg: Graphics; label: Text; glyph: Text }[] = [];
+  private hud!: Graphics;
   private banner!: Text;
   private spent!: Text;
   private finalBg!: Graphics;
   private finalText!: Text;
   private readonly hover = new Graphics();
   private hoverLabel!: Text;
-  private hovered: Interactable | "tasks" | null = null;
+  private hovered: Interactable | null = null;
   /** The latest pointer position, handled once per frame (pointermove fires far more often). */
   private pendingHover: Point | null = null;
   private readonly clickRing = new Graphics();
@@ -207,6 +210,7 @@ export class MarketScene {
   private base = { scale: 1, x: 0, y: 0 };
   private camTarget = { scale: 1, x: 0, y: 0 };
   private cam = { scale: 1, x: 0, y: 0 };
+  private uiWidth = WORLD.w;
   private focused: InteractId | null = null;
   private watchdog: number | null = null;
   /** Day and night: a colour multiplied over the world, and lights drawn on top of it. */
@@ -404,6 +408,7 @@ export class MarketScene {
     if (!fitted) return; // minimized / hidden: keep the last good size
     this.app.renderer.resize(w, h);
     this.base = fitted;
+    this.layoutUi(w);
     this.camTarget = this.cameraFor(this.focused);
     if (this.focused === null) this.cam = { ...this.base };
     // A resize clears the canvas. Draw now, inside the ResizeObserver callback
@@ -440,6 +445,20 @@ export class MarketScene {
     this.world.position.set(this.cam.x, this.cam.y);
   }
 
+  private layoutUi(width: number): void {
+    this.ui.scale.set(this.base.scale);
+    this.uiWidth = width / this.base.scale;
+    this.hud.clear().rect(0, 0, this.uiWidth, 32).fill({ color: PALETTE.ink, alpha: 0.75 });
+    this.spent.x = this.uiWidth - 14;
+    this.finalText.x = this.uiWidth / 2;
+    this.drawFinal(this.model?.finalBanner ?? null);
+  }
+
+  /** World-space destination matching the fixed spending readout. */
+  spentTarget(): Point {
+    return this.world.toLocal(this.ui.toGlobal({ x: this.spent.x - 60, y: this.spent.y }));
+  }
+
   // ------------------------------------------------------------ build once
   private person(texture: Texture, at: Point): Sprite {
     const s = new Sprite(texture);
@@ -451,7 +470,7 @@ export class MarketScene {
   }
 
   private build(backdrop: Texture, people: Record<(typeof SPRITES)[number], Texture>, lanterns: [number, number][]): void {
-    this.app.stage.addChild(this.world);
+    this.app.stage.addChild(this.world, this.ui);
     this.world.addChild(new Sprite(backdrop), this.ambient.back, this.clickRing, this.hover);
 
     for (const agentId of AGENT_ORDER) this.buildSign(agentId);
@@ -490,7 +509,7 @@ export class MarketScene {
     }
     bubbles.addChild(this.mainBubble, this.reviewBubble);
 
-    const hud = new Graphics().rect(0, 0, WORLD.w, 32).fill({ color: PALETTE.ink, alpha: 0.75 });
+    this.hud = new Graphics().rect(0, 0, WORLD.w, 32).fill({ color: PALETTE.ink, alpha: 0.75 });
     this.banner = text("", 16);
     this.banner.anchor.set(0, 0.5);
     this.banner.position.set(12, SPENT_POS.y);
@@ -505,7 +524,8 @@ export class MarketScene {
     this.hoverLabel.visible = false;
 
     const panel = this.buildTaskPanel();
-    this.world.addChild(bubbles, hud, this.banner, this.spent, panel, this.finalBg, this.finalText, this.fx, this.hoverLabel);
+    this.world.addChild(bubbles, this.fx, this.hoverLabel);
+    this.ui.addChild(this.hud, this.banner, this.spent, panel, this.finalBg, this.finalText);
 
     this.world.eventMode = "static";
     this.world.hitArea = new Rectangle(0, 0, WORLD.w, WORLD.h);
@@ -532,6 +552,13 @@ export class MarketScene {
   private buildTaskPanel(): Container {
     const [x0, y0, x1, y1] = TASK_PANEL;
     const panel = new Container();
+    panel.eventMode = "static";
+    panel.cursor = "pointer";
+    panel.hitArea = new Rectangle(x0, y0, x1 - x0, y1 - y0);
+    panel.on("pointertap", (e: FederatedPointerEvent) => {
+      e.stopPropagation();
+      this.onInteract("tasks");
+    });
     const bg = new Graphics().roundRect(x0, y0, x1 - x0, y1 - y0, 6).fill({ color: PALETTE.ink, alpha: 0.72 });
     const title = text("TASKS", 12, PALETTE.gold);
     title.anchor.set(0, 0.5);
@@ -552,10 +579,6 @@ export class MarketScene {
 
   // ------------------------------------------------------------ input
   private click(p: Point): void {
-    if (inPanel(p)) {
-      this.onInteract("tasks");
-      return;
-    }
     const thing = hitTest(p, this.vendorPositions());
     const dest = standable(thing ? thing.approach : p);
     // The panel opens right away; the player still walks over. (Waiting for
@@ -577,20 +600,20 @@ export class MarketScene {
 
   private setHover(p: Point): void {
     // Vendors move, so their box is rebuilt on every call (and the outline follows them).
-    const thing = inPanel(p) ? "tasks" : hitTest(p, this.vendorPositions());
-    const id = (t: typeof thing) => (t === null ? null : t === "tasks" ? "tasks" : t.id);
+    const thing = hitTest(p, this.vendorPositions());
+    const id = (t: typeof thing) => t?.id ?? null;
     // Same person, same spot: nothing to redraw. (A vendor's box is a new
     // object each call, so compare who it is and where, not the object.)
-    if (id(thing) === id(this.hovered) && (thing === null || thing === "tasks" || this.hovered === null || this.hovered === "tasks" || thing.hit.join() === this.hovered.hit.join())) return;
+    if (id(thing) === id(this.hovered) && (thing === null || this.hovered === null || thing.hit.join() === this.hovered.hit.join())) return;
     this.hovered = thing;
     this.app.canvas.style.cursor = thing ? "pointer" : "default";
     this.hover.clear();
     this.hoverLabel.visible = thing !== null;
     if (!thing) return;
-    const [x0, y0, x1, y1] = thing === "tasks" ? TASK_PANEL : thing.hit;
+    const [x0, y0, x1, y1] = thing.hit;
     this.hover.roundRect(x0, y0, x1 - x0, y1 - y0, 8).stroke({ width: 3, color: PALETTE.gold, alpha: 0.95 });
-    this.hoverLabel.text = thing === "tasks" ? "SEE ALL TASKS" : thing.label;
-    this.hoverLabel.position.set((x0 + x1) / 2, thing === "tasks" ? y1 + 12 : Math.max(46, y0 - 12));
+    this.hoverLabel.text = thing.label;
+    this.hoverLabel.position.set((x0 + x1) / 2, Math.max(46, y0 - 12));
   }
 
   // ------------------------------------------------------------ frame loop
@@ -786,25 +809,27 @@ export class MarketScene {
       view.glyph.text = card?.glyph ?? "";
       if (!card) return;
       const y = y0 + 20 + i * 18;
-      if (card.current) view.bg.roundRect(x0 + 4, y - 1, x1 - x0 - 8, 18, 3).fill(PALETTE.gold);
-      view.bg.roundRect(x0 + 6, y + 1, x1 - x0 - 12, 14, 2).fill(CARD_FILL[card.status] ?? PALETTE.paper);
+      const cardRect: Rect = [x0 + 6, y + 1, x1 - 6, y + 15];
+      view.bg.roundRect(cardRect[0], cardRect[1], cardRect[2] - cardRect[0], cardRect[3] - cardRect[1], 2).fill(CARD_FILL[card.status] ?? PALETTE.paper);
       view.bg.rect(x0 + 6, y + 1, 4, 14).fill(TYPE_COLOR[card.type]);
       if (card.winnerColor) view.bg.rect(x0 + 10, y + 13, x1 - x0 - 16, 2).fill(card.winnerColor);
+      if (card.current) {
+        view.bg.roundRect(cardRect[0], cardRect[1], cardRect[2] - cardRect[0], cardRect[3] - cardRect[1], 2)
+          .stroke({ width: 2, color: card.winnerColor ?? PALETTE.gold, alignment: 1 });
+      }
       view.label.style.fill = card.status === "pending" ? PALETTE.cream : PALETTE.ink;
       view.glyph.style.fill = card.status === "failed" ? PALETTE.bad : PALETTE.ink;
     });
 
-    this.finalBg.clear();
-    this.finalText.text = model.finalBanner ?? "";
-    if (model.finalBanner) {
-      const w = this.finalText.width + 30;
-      this.finalBg.roundRect(WORLD.w / 2 - w / 2 - 3, 40, w + 6, 34, 7).fill(PALETTE.ink);
-      this.finalBg.roundRect(WORLD.w / 2 - w / 2, 43, w, 28, 5).fill(PALETTE.gold);
-    }
+    this.drawFinal(model.finalBanner);
   }
-}
 
-function inPanel(p: Point): boolean {
-  const [x0, y0, x1, y1] = TASK_PANEL;
-  return p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1;
+  private drawFinal(message: string | null): void {
+    this.finalBg.clear();
+    this.finalText.text = message ?? "";
+    if (!message) return;
+    const w = this.finalText.width + 30;
+    this.finalBg.roundRect(this.uiWidth / 2 - w / 2 - 3, 40, w + 6, 34, 7).fill(PALETTE.ink);
+    this.finalBg.roundRect(this.uiWidth / 2 - w / 2, 43, w, 28, 5).fill(PALETTE.gold);
+  }
 }

@@ -13,7 +13,7 @@ import { Container, Graphics, type Sprite, type Text, type Ticker } from "pixi.j
 import { sfx } from "../audio/sfx";
 import type { AbyssEvent, AgentId, TaskType } from "../contract";
 import { AGENT_ORDER, verdict } from "./model";
-import { PALETTE, SPENT_POS, text, type MarketScene, type VendorStage } from "./Scene";
+import { PALETTE, text, type MarketScene, type VendorStage } from "./Scene";
 import { MAIN_AGENT_POS, REVIEWER_POS, REVIEW_SPOT, STALLS, WORLD, route, type Point } from "./world";
 import { isStopNote } from "../state/reducer";
 
@@ -403,7 +403,7 @@ export class Director {
 
   private coin(x: number, y: number, delayMs: number): void {
     const coin = new Graphics().circle(0, 0, 6).fill(PALETTE.ink).circle(0, 0, 4).fill(PALETTE.gold);
-    const to = { x: SPENT_POS.x - 60, y: SPENT_POS.y };
+    const to = this.scene.spentTarget();
     this.add(coin, 900, (p) => {
       coin.x = x + (to.x - x) * p;
       coin.y = y + (to.y - y) * p - 90 * Math.sin(Math.PI * p);
