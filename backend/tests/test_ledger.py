@@ -19,6 +19,8 @@ def _record_fixture_usage(ledger: Ledger, events: list[dict]) -> None:
             continue
         data = event["data"]
         usage = data["usage"]
+        if usage is None:  # a stall on standby made no call
+            continue
         ledger.record(
             task_id=data.get("task_id"),
             agent_id=data.get("agent_id") if purpose in {"bid", "work"} else None,

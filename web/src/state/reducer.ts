@@ -8,6 +8,7 @@ import type {
   StatsData,
   TaskSpec,
   TaskType,
+  Usage,
 } from "../contract";
 
 export type AgentStatus = "idle" | "bidding" | "working";
@@ -30,6 +31,8 @@ export interface TaskView extends TaskSpec {
   bids: Partial<Record<AgentId, BidData>>;
   winner: AgentId | null;
   output: string | null;
+  /** The winner's actual work call (tokens and cost). */
+  workUsage: Usage | null;
   grade: number | null;
   rationale: string | null;
 }
@@ -160,6 +163,7 @@ export function reduce(state: MarketState, ev: AbyssEvent): MarketState {
         agents: mapAgentStatus(state.agents, () => "idle"),
         tasks: updateTask(state.tasks, ev.data.task_id, {
           output: ev.data.output,
+          workUsage: ev.data.usage,
           status: "done",
         }),
       };
@@ -231,6 +235,7 @@ function createTask(task: TaskSpec): TaskView {
     bids: {},
     winner: null,
     output: null,
+    workUsage: null,
     grade: null,
     rationale: null,
   };

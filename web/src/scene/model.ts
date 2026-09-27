@@ -60,6 +60,11 @@ export function currentTask(state: MarketState): TaskView | null {
   return null;
 }
 
+/** The premium stall sits out a task unless the cheaper stalls have been slipping. */
+export function isStandby(bid: { ok: boolean; error: string | null }): boolean {
+  return !bid.ok && (bid.error ?? "").startsWith("standby");
+}
+
 export function formatCents(usd: number): string {
   const cents = usd * 100;
   return cents < 1 ? `${cents.toFixed(2)}¢` : `${cents.toFixed(1)}¢`;
@@ -70,7 +75,7 @@ function bubbleFor(agentId: AgentId, task: TaskView | null): StallModel["bubble"
   if (task.status === "open") {
     const bid = task.bids[agentId];
     if (!bid) return { text: "...", tone: "thinking" };
-    if (!bid.ok) return { text: "PASS", tone: "pass" };
+    if (!bid.ok) return { text: isStandby(bid) ? "STANDBY" : "PASS", tone: "pass" };
     return { text: `Q${bid.promised_quality} ${formatCents(bid.predicted_cost_usd ?? 0)}`, tone: "bid" };
   }
   if (task.winner !== agentId) return null;

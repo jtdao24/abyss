@@ -8,8 +8,9 @@ import type { EventSource } from "./sources/types";
 import { WsSource } from "./sources/ws";
 import type { MarketState } from "./state/reducer";
 import { store } from "./state/store";
-import { DebugPanel } from "./ui/DebugPanel";
+import { CostCompare } from "./ui/CostCompare";
 import { GameDialog } from "./ui/GameDialog";
+import { Ledger } from "./ui/Ledger";
 
 const params = new URLSearchParams(window.location.search);
 const SOURCE = params.get("source") === "fixture" ? "fixture" : "ws"; // live by default; ?source=fixture replays a recording
@@ -125,6 +126,7 @@ export default function App() {
             <small>Live view. Give jobs and steer from the terminal: python -m abyss.chat. Click anyone here to zoom in and watch.</small>
           </div>
           <div className="header-actions">
+            <CostCompare state={state} />
             <button type="button" className="ledger-toggle" onClick={() => setShowLedger((v) => !v)}>
               {showLedger ? "Hide ledger" : "Show ledger"}
             </button>
@@ -143,7 +145,7 @@ export default function App() {
           )}
         </div>
       </section>
-      {showLedger && <DebugPanel state={state} />}
+      {showLedger && <Ledger state={state} />}
     </main>
   );
 }

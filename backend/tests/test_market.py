@@ -12,6 +12,7 @@ from abyss.llm import LLM, LLMError
 from abyss.market import run_job
 from abyss.orchestrator import TaskSpec
 from abyss.reputation import ReputationStore
+from abyss.scoring import STANDBY, premium_on_standby
 
 
 class FailingLLM:
@@ -95,8 +96,9 @@ async def test_fake_run_validates_and_ledger_matches(monkeypatch, tmp_path) -> N
     task_count = len(
         next(event for event in events if event["type"] == "job_split")["data"]["tasks"]
     )
-    # split + 3 bids, 1 work and 1 review per task + the main agent's assemble call
-    assert len(result.ledger.entries()) == 1 + 3 * task_count + task_count + task_count + 1
+    # split + 2 bids (the premium stall is on standby), 1 work and 1 review per task
+    # + the main agent's assemble call
+    assert len(result.ledger.entries()) == 1 + 2 * task_count + task_count + task_count + 1
     assembled = next(event for event in events if event["type"] == "assembled")
     assert result.final["filename"] == assembled["data"]["filename"]
     assert result.final["deliverable"]
@@ -106,6 +108,57 @@ async def test_fake_run_validates_and_ledger_matches(monkeypatch, tmp_path) -> N
         6,
     )
     assert result.final["total_cost_usd"] == total
+
+
+@pytest.mark.asyncio
+async def test_bids_run_on_the_budget_model_but_price_each_stall(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("ABYSS_PROVIDER", "openai")
+    events, result, _, _ = await _run(monkeypatch, tmp_path, tasks=_tasks())
+
+    bid_rows = [row for row in result.ledger.entries() if row.purpose == "bid"]
+    assert {row.agent_id for row in bid_rows} == {"haiku", "sonnet"}
+    assert {row.model for row in bid_rows} == {"gpt-6-luna"}  # never a premium call for a quote
+    sonnet_bid = next(e["data"] for e in events if e["type"] == "bid" and e["data"]["agent_id"] == "sonnet")
+    assert sonnet_bid["predicted_cost_usd"] == cost_usd(
+        "gpt-6-sol", sonnet_bid["est_input_tokens"], sonnet_bid["predicted_output_tokens"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_premium_stall_is_a_backup(monkeypatch, tmp_path) -> None:
+    events, _, _, _ = await _run(monkeypatch, tmp_path, tasks=_tasks())
+    opus_bids = [e["data"] for e in events if e["type"] == "bid" and e["data"]["agent_id"] == "opus"]
+    assert [b["error"] for b in opus_bids] == [STANDBY, STANDBY]  # sits out while the others are trusted
+    assert all(e["data"]["agent_id"] != "opus" for e in events if e["type"] == "won")
+
+
+@pytest.mark.asyncio
+async def test_premium_steps_in_when_cheaper_stalls_slip(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("ABYSS_FAKE_LLM", "1")
+    monkeypatch.setenv("ABYSS_FAKE_DELAY", "0")
+    monkeypatch.setenv("ABYSS_LEDGER_PATH", str(tmp_path / "ledger.jsonl"))
+    rep = ReputationStore()
+    for agent_id in ("haiku", "sonnet"):  # both keep delivering less than they promise
+        for _ in range(3):
+            rep.update(agent_id, "research", 5, 10)
+    events: list[dict] = []
+
+    async def sink(event: dict) -> None:
+        events.append(event)
+
+    stream = EventStream(sink)
+    await stream.hello(rep)
+    await run_job("Explain a fact.", stream=stream, llm=LLM(), rep=rep, tasks=_tasks())
+    validate_stream(events)
+    opus = {e["data"]["task_id"]: e["data"] for e in events if e["type"] == "bid" and e["data"]["agent_id"] == "opus"}
+    assert opus["t1"]["ok"]  # research: both cheaper stalls slipped, so the backup bids
+    assert opus["t2"]["error"] == STANDBY  # writing: they're still trusted
+
+
+def test_standby_rule() -> None:
+    assert premium_on_standby([1.0, 0.8], 1.0, 0.9)  # one cheaper stall is still trusted
+    assert not premium_on_standby([0.85, 0.8], 1.0, 0.9)  # both slipped
+    assert not premium_on_standby([1.0, 1.0], 0.0, 0.9)  # quality only: always bid
 
 
 @pytest.mark.asyncio
@@ -119,7 +172,8 @@ async def test_one_failed_bid_does_not_stop_task(monkeypatch, tmp_path) -> None:
 
     validate_stream(events)
     failed_bids = [
-        event for event in events if event["type"] == "bid" and not event["data"]["ok"]
+        event for event in events
+        if event["type"] == "bid" and not event["data"]["ok"] and event["data"]["error"] != STANDBY
     ]
     assert len(failed_bids) == 1
     assert result.status == "ok"

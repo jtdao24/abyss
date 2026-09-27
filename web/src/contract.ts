@@ -41,6 +41,8 @@ export interface HelloData {
     fake_llm: boolean;
     orchestrator_model: string;
     reviewer_model: string;
+    /** USD per million [input, output] tokens for every model in play. Older recordings omit it. */
+    prices?: Record<string, [number, number]>;
   };
 }
 

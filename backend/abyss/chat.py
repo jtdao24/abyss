@@ -130,7 +130,8 @@ def describe(event: dict, state: ChatState) -> str | None:
     if kind == "bid":
         who = VENDOR[d["agent_id"]]
         if not d["ok"]:
-            return dim(f"   {who} passed")
+            standby = (d["error"] or "").startswith("standby")
+            return dim(f"   {who} is on standby (backup only)" if standby else f"   {who} passed")
         cents = (d["predicted_cost_usd"] or 0) * 100
         return dim(f"   {who} bids: promises {d['promised_quality']}/10 for {cents:.2f}¢ — \"{d['pitch']}\"")
     if kind == "won":
