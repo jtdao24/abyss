@@ -95,6 +95,25 @@ async def test_work_runs_tools_and_bills_every_round() -> None:
 
 
 @pytest.mark.asyncio
+async def test_openai_tool_work_turns_reasoning_off() -> None:
+    # OpenAI rejects function tools with reasoning_effort on Chat Completions.
+    llm, completions = openai_llm([final_response()], StubHub())
+    await work(llm, Ledger("j_00000001", None))
+    assert completions.calls[0]["reasoning_effort"] == "none"
+
+
+@pytest.mark.asyncio
+async def test_models_that_cant_turn_reasoning_off_work_without_tools(monkeypatch) -> None:
+    monkeypatch.setattr(config, "served_model", lambda provider, nominal: "gpt-6-astra")
+    hub = StubHub()
+    llm, completions = openai_llm([final_response("Done without tools.")], hub)
+    result = await work(llm, Ledger("j_00000001", None))
+    assert result.text == "Done without tools."
+    assert "tools" not in completions.calls[0]
+    assert completions.calls[0]["reasoning_effort"] == "low"
+
+
+@pytest.mark.asyncio
 async def test_other_purposes_never_see_tools() -> None:
     llm, completions = openai_llm([final_response()], StubHub())
     await work(llm, Ledger("j_00000001", None), purpose="review")

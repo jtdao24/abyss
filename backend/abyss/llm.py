@@ -116,7 +116,8 @@ class LLM:
             )
 
         provider_name = self.provider_name
-        if purpose == "work" and await self._tools_ready():
+        served = config.served_model(provider_name, nominal_model)
+        if purpose == "work" and _takes_tools(provider_name, served) and await self._tools_ready():
             return await self._openai_tool_work(
                 provider_name=provider_name,
                 ledger=ledger,
@@ -188,6 +189,9 @@ class LLM:
             provider_name=provider_name, model=model, system=system, user=user,
             max_tokens=max_tokens, effort=effort, schema=None,
         )
+        if provider_name != "meta" and "reasoning_effort" in request:
+            # OpenAI's Chat Completions takes function tools only with reasoning off.
+            request["reasoning_effort"] = "none"
         request["tools"] = [
             {"type": "function", "function": {
                 "name": tool["name"], "description": tool["description"], "parameters": tool["input_schema"],
@@ -489,6 +493,15 @@ OPENAI_STOP_REASONS = {"stop": "end_turn", "length": "max_tokens", "content_filt
 # Reasoning models spend hidden tokens before answering, and those count against
 # the completion cap: give it headroom (only tokens actually used are billed).
 REASONING_HEADROOM = 4000
+
+
+# OpenAI models that can't turn reasoning off, so can't use function tools on
+# Chat Completions at all: they do their work without tools.
+NO_TOOL_MODELS = {"gpt-6-astra"}
+
+
+def _takes_tools(provider_name: str, model: str) -> bool:
+    return provider_name == "meta" or model not in NO_TOOL_MODELS
 
 
 def _openai_request(
