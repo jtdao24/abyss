@@ -27,6 +27,16 @@ export interface SessionSummary {
   filename: string | null;
   started_at: number | null;
   duration_ms: number | null;
+  budget_usd: number | null;
+}
+
+export interface Estimate {
+  provider: string;
+  test_mode: boolean;
+  tasks: number;
+  low_usd: number;
+  high_usd: number;
+  calls: number;
 }
 
 export interface SessionRecord {
@@ -75,4 +85,6 @@ export const api = {
   sessions: () => getJson<SessionSummary[]>("/api/sessions"),
   session: (id: string) => getJson<SessionRecord>(`/api/sessions/${encodeURIComponent(id)}`),
   usage: () => getJson<Usage>("/api/usage"),
+  estimate: (provider: string | null) =>
+    getJson<Estimate>(`/api/estimate${provider ? `?provider=${encodeURIComponent(provider)}` : ""}`),
 };

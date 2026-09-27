@@ -1,20 +1,62 @@
-// Read-only panels for whoever the player walked up to. Jobs and steering
-// happen in the terminal chat (python -m abyss.chat); this view only watches.
-import { useState, type ReactNode } from "react";
+// Panels for whoever the player walked up to. The Captain runs sessions
+// (start a job, pick the AI, cap the spend, reopen past ones); the vendors can
+// be steered. The terminal chat (python -m abyss.chat) still works alongside.
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
-import type { AgentId, TaskType } from "../contract";
+import { api, type Estimate, type Provider, type SessionRecord, type SessionSummary } from "../api";
+import type { AgentId, ClientMsg, TaskType } from "../contract";
 import { VENDOR, formatCents } from "../scene/model";
 import type { InteractId } from "../scene/world";
 import type { MarketState, TaskView } from "../state/reducer";
 import { ResultView } from "./Deliverable";
 
 const TYPES: TaskType[] = ["research", "writing", "checking"];
-const CHAT_COMMAND = "python -m abyss.chat";
 
 interface GameDialogProps {
   id: InteractId;
   state: MarketState;
   onClose(): void;
+  /** Sends to the market; absent when replaying a recording. */
+  send?: (message: ClientMsg) => boolean;
+  /** AIs this machine has keys for, the default first. */
+  providers?: Provider[];
+  /** Saved sessions, newest first (they survive reloads). */
+  sessions?: SessionSummary[];
+}
+
+const money = (usd: number) => `$${usd.toFixed(usd < 0.1 ? 4 : 2)}`;
+
+/** The market's latest refusal of something this page sent (a non-fatal error). */
+function useLastRefusal(state: MarketState): string | null {
+  const last = [...state.log].reverse().find((e) => e.type === "error" && e.job_id === null);
+  return last && last.type === "error" && !last.data.fatal ? last.data.message : null;
+}
+
+/** A note to one vendor, or to every remaining step of the session. */
+function SteerBox({ state, send, target, label }: { state: MarketState; send?: GameDialogProps["send"]; target: "job" | AgentId; label: string }) {
+  const [note, setNote] = useState("");
+  if (!send) return null;
+  const running = state.jobActive;
+  return (
+    <form
+      className="steer-box"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (note.trim() && send({ type: "steer", target, note: note.trim() })) setNote("");
+      }}
+    >
+      <h3>{label}</h3>
+      <textarea
+        value={note}
+        maxLength={500}
+        rows={2}
+        disabled={!running}
+        placeholder={running ? "e.g. keep it under 150 words, cite sources" : "Steering opens while a session runs"}
+        onChange={(e) => setNote(e.target.value)}
+      />
+      <button type="submit" disabled={!running || !note.trim()}>Send note</button>
+    </form>
+  );
 }
 
 function Shell({ title, subtitle, onClose, children, side = true }: { title: string; subtitle?: string; onClose(): void; children: ReactNode; side?: boolean }) {
@@ -63,54 +105,172 @@ function TaskRow({ task }: { task: TaskView }) {
   );
 }
 
-/** Finished jobs this session, newest first; click one to see its file. */
-function PastJobs({ state }: { state: MarketState }) {
-  const [open, setOpen] = useState<string | null>(null);
-  const jobs = [...state.history].reverse();
-  if (jobs.length === 0) return null;
+function NewSession({ state, send, providers }: Pick<GameDialogProps, "state" | "send" | "providers">) {
+  const [job, setJob] = useState("");
+  const [picked, setPicked] = useState<string | null>(null);
+  const [budget, setBudget] = useState("");
+  const [estimate, setEstimate] = useState<Estimate | null>(null);
+  const refusal = useLastRefusal(state);
+  const choices = providers ?? [];
+  const provider = picked ?? choices[0]?.id ?? null;
+
+  // What a typical session costs on the chosen AI (no AI calls).
+  useEffect(() => {
+    let live = true;
+    api.estimate(provider).then((e) => live && setEstimate(e)).catch(() => live && setEstimate(null));
+    return () => {
+      live = false;
+    };
+  }, [provider]);
+
+  if (!send) return <p className="rpg-hint">This is a replay, so new sessions can't start here.</p>;
+  if (state.jobActive) return <p className="rpg-hint">The crew is on the current session. Start a new one when it finishes.</p>;
+  const budgetUsd = budget.trim() ? Number(budget) : null;
+  const budgetOk = budgetUsd === null || (Number.isFinite(budgetUsd) && budgetUsd > 0 && budgetUsd <= 100);
+  const start = () => {
+    const text = job.trim();
+    if (!text || !state.connected || !budgetOk) return;
+    const message: ClientMsg = {
+      type: "start_job",
+      job: text,
+      ...(provider && choices.length > 1 ? { provider } : {}),
+      ...(budgetUsd !== null ? { budget_usd: budgetUsd } : {}),
+    };
+    if (send(message)) setJob("");
+  };
+  const overBudget = estimate && budgetUsd !== null && budgetUsd < estimate.low_usd;
   return (
-    <section className="past-jobs">
-      <h3>Past jobs</h3>
-      <ul className="board-list">
-        {jobs.map((entry) => (
-          <li key={entry.jobId}>
-            <button type="button" className="archive-row" onClick={() => setOpen(open === entry.jobId ? null : entry.jobId)}>
-              <strong>{entry.final.filename ?? entry.jobText ?? entry.jobId}</strong>
-              <em>grade {entry.final.mean_grade ?? "—"} · ${entry.final.total_cost_usd.toFixed(4)}</em>
+    <form
+      className="session-form"
+      onSubmit={(e) => {
+        e.preventDefault();
+        start();
+      }}
+    >
+      <label htmlFor="session-job">What do you need?</label>
+      <textarea
+        id="session-job"
+        value={job}
+        maxLength={2000}
+        rows={3}
+        placeholder="e.g. Research the best beach cafes in Miami and write a 150-word guide"
+        onChange={(e) => setJob(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            start();
+          }
+        }}
+      />
+      {choices.length > 1 && (
+        <div className="segmented" role="radiogroup" aria-label="AI for this session">
+          {choices.map((p) => (
+            <button key={p.id} type="button" role="radio" aria-checked={provider === p.id} className={provider === p.id ? "on" : ""} onClick={() => setPicked(p.id)}>
+              {p.label}
             </button>
-            {open === entry.jobId && <ResultView final={entry.final} />}
-          </li>
-        ))}
-      </ul>
-    </section>
+          ))}
+        </div>
+      )}
+      <div className="budget-row">
+        <label htmlFor="session-budget">Budget cap</label>
+        <span className="money-input">
+          $<input
+            id="session-budget"
+            inputMode="decimal"
+            value={budget}
+            placeholder="none"
+            onChange={(e) => setBudget(e.target.value.replace(/[^0-9.]/g, ""))}
+          />
+        </span>
+        {estimate && (
+          <span className="estimate" title={`About ${estimate.calls} AI calls for ${estimate.tasks} tasks${estimate.test_mode ? ", test mode" : ""}`}>
+            Estimated {estimate.high_usd - estimate.low_usd < 0.00005 ? `≈ ${money(estimate.low_usd)}` : `${money(estimate.low_usd)}–${money(estimate.high_usd)}`}
+          </span>
+        )}
+      </div>
+      {!budgetOk && <p className="form-error">A budget is between $0.0001 and $100.</p>}
+      {overBudget && <p className="rpg-hint">That cap is below the usual cost, so the crew may stop after the first task.</p>}
+      {budgetUsd !== null && budgetOk && (
+        <p className="rpg-hint">Once the cap is reached no new task starts; the task in progress and the final packaging still finish.</p>
+      )}
+      <button type="submit" className="btn-primary" disabled={!job.trim() || !state.connected || !budgetOk}>
+        {state.connected ? "Start session" : "Connecting…"}
+      </button>
+      {refusal && <p className="form-error" role="alert">{refusal}</p>}
+    </form>
   );
 }
 
-function MainAgentDialog({ state, onClose }: GameDialogProps) {
-  if (!state.currentJob && !state.jobActive) {
-    return (
-      <Shell title="Captain" subtitle="Ahoy! Got a job for the crew? Send it from the terminal chat." onClose={onClose}>
-        <p>Open a terminal and run <code>{CHAT_COMMAND}</code>, then type what you need. I'll split it into tasks, the vendors will bid for them, and the finished file lands in your Downloads folder.</p>
-        <PastJobs state={state} />
-      </Shell>
-    );
-  }
-  const job = state.currentJob;
-  const subtitle = state.final
-    ? state.final.filename ? `Done — sent ${state.final.filename} to your Downloads folder.` : "The job ended without a file."
-    : state.assembled
-      ? `Packaging everything into ${state.assembled.filename}...`
-      : "Aye aye! The crew is on it.";
+function PastSession({ id }: { id: string }) {
+  const [record, setRecord] = useState<SessionRecord | null | "error">(null);
+  useEffect(() => {
+    api.session(id).then(setRecord).catch(() => setRecord("error"));
+  }, [id]);
+  if (record === null) return <p className="rpg-hint">Loading…</p>;
+  if (record === "error") return <p className="rpg-hint">Couldn't load this session.</p>;
   return (
-    <Shell title="Captain" subtitle={subtitle} onClose={onClose}>
-      {job && <p className="job-quote">"{job.jobText}"</p>}
-      <ul className="task-lines">
-        {state.taskOrder.map((id) => <TaskRow key={id} task={state.tasks[id]} />)}
-      </ul>
-      <Notes state={state} target="job" label="Your notes for everyone" />
-      {state.final && <ResultView final={state.final} />}
-      {!state.final && <p className="rpg-hint">The vendors come to my boat for each task. Steer them from the terminal with <code>/steer</code>.</p>}
-      <PastJobs state={state} />
+    <>
+      <p className="job-quote">"{record.job_text}"</p>
+      {record.final ? <ResultView final={record.final} /> : <p className="rpg-hint">This session ended without a result ({record.status}).</p>}
+    </>
+  );
+}
+
+function MainAgentDialog({ state, onClose, send, providers, sessions }: GameDialogProps) {
+  const current = state.currentJob;
+  const [pick, setPick] = useState<string>(current ? current.jobId : "new");
+  // A session that just started (from here or the terminal) opens on its own.
+  const lastJob = useRef(current?.jobId ?? null);
+  useEffect(() => {
+    const id = current?.jobId ?? null;
+    if (id && id !== lastJob.current) setPick(id);
+    lastJob.current = id;
+  }, [current?.jobId]);
+
+  const past = (sessions ?? []).filter((s) => s.id !== current?.jobId);
+  const view = pick === "new" || pick === current?.jobId || past.some((s) => s.id === pick) ? pick : "new";
+  const subtitle =
+    view === "new"
+      ? "Ahoy! Got a job for the crew? The vendors bid for every task."
+      : view === current?.jobId
+        ? state.final
+          ? state.final.filename ? `Done: ${state.final.filename}` : "The session ended without a file."
+          : state.assembled
+            ? `Packaging everything into ${state.assembled.filename}…`
+            : "Aye aye! The crew is on it."
+        : "A past session.";
+  const clip = (text: string) => (text.length > 44 ? `${text.slice(0, 42)}…` : text);
+
+  return (
+    <Shell title="Captain · Sessions" subtitle={subtitle} onClose={onClose}>
+      <nav className="session-list" aria-label="Sessions">
+        <button type="button" className={view === "new" ? "on new" : "new"} onClick={() => setPick("new")}>+ New session</button>
+        {current && (
+          <button type="button" className={view === current.jobId ? "on" : ""} onClick={() => setPick(current.jobId)}>
+            <i className={`session-dot ${state.jobActive ? "live" : "done"}`} />
+            <span>{clip(current.jobText || "Current session")}</span>
+          </button>
+        )}
+        {past.map((s) => (
+          <button key={s.id} type="button" className={view === s.id ? "on" : ""} onClick={() => setPick(s.id)}>
+            <i className={`session-dot ${s.status === "ok" ? "done" : "failed"}`} />
+            <span>{clip(s.job_text || s.filename || s.id)}</span>
+            <em>{money(s.cost_usd)}{s.mean_grade != null ? ` · ${s.mean_grade}/10` : ""}</em>
+          </button>
+        ))}
+      </nav>
+
+      {view === "new" && <NewSession state={state} send={send} providers={providers} />}
+      {current && view === current.jobId && (
+        <>
+          <p className="job-quote">"{current.jobText}"</p>
+          <ul className="task-lines">{state.taskOrder.map((id) => <TaskRow key={id} task={state.tasks[id]} />)}</ul>
+          <Notes state={state} target="job" label="Your notes for the crew" />
+          {state.jobActive && <SteerBox state={state} send={send} target="job" label="Steer the whole session" />}
+          {state.final && <ResultView final={state.final} />}
+        </>
+      )}
+      {view !== "new" && view !== current?.jobId && <PastSession key={view} id={view} />}
     </Shell>
   );
 }
@@ -129,7 +289,7 @@ function vendorActivity(state: MarketState, agentId: AgentId): { line: string; t
   return { line: state.jobActive ? "Waiting for the next task" : "Waiting for a job", task: null };
 }
 
-function VendorDialog({ state, onClose, agentId }: GameDialogProps & { agentId: AgentId }) {
+function VendorDialog({ state, onClose, agentId, send }: GameDialogProps & { agentId: AgentId }) {
   const agent = state.agents[agentId];
   const vendor = VENDOR[agentId];
   const stats = state.stats?.by_agent[agentId];
@@ -159,7 +319,7 @@ function VendorDialog({ state, onClose, agentId }: GameDialogProps & { agentId: 
         </section>
       )}
       <Notes state={state} target={agentId} label="Your notes for this vendor" />
-      <p className="rpg-hint">Steer it from the terminal: <code>/steer {number} &lt;note&gt;</code></p>
+      <SteerBox state={state} send={send} target={agentId} label={`Steer vendor ${number}`} />
       {mine.length > 0 && (
         <>
           <h3>This job</h3>
@@ -188,7 +348,7 @@ function VendorDialog({ state, onClose, agentId }: GameDialogProps & { agentId: 
 function TasksDialog({ state, onClose }: GameDialogProps) {
   const open = state.taskOrder.map((id) => state.tasks[id]);
   return (
-    <Shell side={false} title="Tasks" subtitle={open.length ? `${open.length} tasks for the current job` : `No tasks yet. Give the Captain a job from the terminal (${CHAT_COMMAND}).`} onClose={onClose}>
+    <Shell side={false} title="Tasks" subtitle={open.length ? `${open.length} tasks for the current job` : "No tasks yet. Click the Captain on the boat to start a session."} onClose={onClose}>
       <ul className="board-list">
         {open.map((task) => (
           <li key={task.task_id}>

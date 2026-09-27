@@ -28,12 +28,13 @@ def _safe_id(job_id: str) -> bool:
 class SessionStore:
     def __init__(self, directory: Path | None = None) -> None:
         self.directory = directory or sessions_dir()
-        self._pending: tuple[str, str | None] | None = None  # (job text, provider) until job_split
+        # (job text, provider, budget) until the job's job_split names it
+        self._pending: tuple[str, str | None, float | None] | None = None
 
     # ------------------------------------------------------------- writing
-    def expect(self, job_text: str, provider: str | None) -> None:
+    def expect(self, job_text: str, provider: str | None, budget_usd: float | None = None) -> None:
         """The market is about to start this job; its job_id arrives with job_split."""
-        self._pending = (job_text, provider)
+        self._pending = (job_text, provider, budget_usd)
 
     def observe(self, event: dict) -> None:
         job_id = event.get("job_id")
@@ -42,12 +43,13 @@ class SessionStore:
             return
         try:
             if kind == "job_split":
-                text, provider = self._pending or ("", None)
+                text, provider, budget = self._pending or ("", None, None)
                 self._pending = None
                 self._write(job_id, {
                     "id": job_id,
                     "job_text": text,
                     "provider": provider or config.provider(),
+                    "budget_usd": budget,
                     "status": "running",
                     "started_at": time.time(),
                     "stats": None,
@@ -113,6 +115,7 @@ class SessionStore:
                 "filename": final.get("filename"),
                 "started_at": r.get("started_at"),
                 "duration_ms": final.get("duration_ms"),
+                "budget_usd": r.get("budget_usd"),
             })
         return out
 

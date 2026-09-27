@@ -21,6 +21,7 @@ from .events import EventStream, hello_data
 from .llm import LLM
 from .market import Guidance, run_job
 from .reputation import ReputationStore
+from .estimate import estimate_session
 from .sessions import SessionStore, usage_summary
 
 
@@ -85,17 +86,29 @@ class Market:
         """An error for one connection only (bad message, busy market, ...)."""
         await ws.send_json(self.stream.stamp("error", {"message": message, "task_id": None, "fatal": False}, job_id=None))
 
-    def start(self, job: str, price_weight: float, provider: str | None = None) -> None:
+    def start(
+        self, job: str, price_weight: float, provider: str | None = None, budget_usd: float | None = None
+    ) -> None:
         self.backlog = []
         self.guidance = Guidance()
-        sessions.expect(job, provider)
-        self.running = asyncio.create_task(self._run(job, price_weight, self.guidance, llm_for(provider)))
+        sessions.expect(job, provider, budget_usd)
+        self.running = asyncio.create_task(
+            self._run(job, price_weight, self.guidance, llm_for(provider), budget_usd)
+        )
 
-    async def _run(self, job: str, price_weight: float, guidance: Guidance, job_llm: LLM | None = None) -> None:
+    async def _run(
+        self,
+        job: str,
+        price_weight: float,
+        guidance: Guidance,
+        job_llm: LLM | None = None,
+        budget_usd: float | None = None,
+    ) -> None:
         # A crashed job must tell everyone instead of leaving them waiting forever.
         try:
             await run_job(
-                job, stream=self.stream, llm=job_llm or llm, rep=reputation, price_weight=price_weight, guidance=guidance
+                job, stream=self.stream, llm=job_llm or llm, rep=reputation, price_weight=price_weight,
+                guidance=guidance, budget_usd=budget_usd,
             )
         except Exception as exc:
             logger.exception("job crashed")
@@ -154,6 +167,12 @@ async def api_usage() -> dict:
     return usage_summary(sessions)
 
 
+@app.get("/api/estimate")
+async def api_estimate(provider: str | None = None) -> dict:
+    """What a typical session will cost on this AI, before starting it (no calls)."""
+    return estimate_session(provider)
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket) -> None:
     await ws.accept()
@@ -176,7 +195,12 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                 if error is not None:
                     await market.reply_error(ws, error)
                     continue
-                market.start(message["job"], message.get("price_weight", config.PRICE_WEIGHT), message.get("provider"))
+                market.start(
+                    message["job"],
+                    message.get("price_weight", config.PRICE_WEIGHT),
+                    message.get("provider"),
+                    message.get("budget_usd"),
+                )
             elif message_type == "steer":
                 error = _validate_steer(message)
                 if error is None and (not market.busy or market.guidance is None):
@@ -224,6 +248,11 @@ def _validate_start(message: dict) -> str | None:
     provider = message.get("provider")
     if provider is not None and provider not in config.available_providers():
         return f"{config.PROVIDER_LABELS.get(provider, provider)} has no API key on this machine"
+    budget = message.get("budget_usd")
+    if budget is not None and (
+        isinstance(budget, bool) or not isinstance(budget, (int, float)) or not 0 < budget <= 100
+    ):
+        return "budget_usd must be more than $0 and at most $100"
     return None
 
 

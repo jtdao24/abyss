@@ -53,6 +53,7 @@ async def run_job(
     fixed_agent_id: str | None = None,
     tasks: list[TaskSpec] | None = None,
     guidance: Guidance | None = None,
+    budget_usd: float | None = None,
 ) -> JobResult:
     job_id = new_job_id()
     stream.start_job(job_id)
@@ -119,6 +120,14 @@ async def run_job(
                 "est_input_tokens": estimated_input,
             },
         )
+
+        # Budget cap (soft): once the session has spent it, no new task starts.
+        # Every vendor passes without a call, so stopping costs nothing.
+        if budget_usd is not None and ledger.total_cost() >= budget_usd:
+            await _budget_stop(stream, ledger, tasks_won, task, budget_usd)
+            task_failed = True
+            final_tasks.append(_final_task(task, None, None, None, ledger))
+            continue
 
         if fixed_agent_id is None:
             auction = await _run_auction(
@@ -453,6 +462,36 @@ async def _review_with_retry(
             if attempt == 1:
                 raise
     raise AssertionError("unreachable")
+
+
+async def _budget_stop(
+    stream: EventStream,
+    ledger: Ledger,
+    tasks_won: dict[str, int],
+    task: TaskSpec,
+    budget_usd: float,
+) -> None:
+    """End a task before any call: each vendor passes, then a (non-fatal) error."""
+    message = f"budget reached: ${ledger.total_cost():.4f} of ${budget_usd:.4f} spent"
+    for agent in config.AGENTS:
+        await stream.emit(
+            "bid",
+            {
+                "task_id": task.task_id,
+                "agent_id": agent.agent_id,
+                "ok": False,
+                "error": message,
+                "predicted_output_tokens": None,
+                "est_input_tokens": None,
+                "predicted_cost_usd": None,
+                "promised_quality": None,
+                "pitch": None,
+                "reputation": None,
+                "score": None,
+                "usage": None,
+            },
+        )
+    await _task_error(stream, ledger, tasks_won, task.task_id, message)
 
 
 async def _task_error(

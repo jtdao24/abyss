@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { api, type Prices, type Provider, type SessionSummary, type Usage } from "./api";
+import type { ClientMsg } from "./contract";
+
 import { Director } from "./scene/director";
 import { MarketScene } from "./scene/Scene";
 import type { InteractId } from "./scene/world";
@@ -8,6 +11,7 @@ import type { EventSource } from "./sources/types";
 import { WsSource } from "./sources/ws";
 import type { MarketState } from "./state/reducer";
 import { store } from "./state/store";
+import { CostPanel } from "./ui/CostPanel";
 import { DebugPanel } from "./ui/DebugPanel";
 import { GameDialog } from "./ui/GameDialog";
 
@@ -49,8 +53,14 @@ function modeBadge(state: MarketState): { label: string; tone: string } {
 export default function App() {
   const [state, setState] = useState(store.getState());
   const [dialog, setDialog] = useState<InteractId | null>(null);
-  const [showLedger, setShowLedger] = useState(params.get("ledger") === "1");
+  // ?ledger=1 shows the raw call ledger; otherwise the right drawer is the cost dashboard.
+  const rawLedger = params.get("ledger") === "1";
+  const [showLedger, setShowLedger] = useState(rawLedger || (SOURCE === "ws" && window.innerWidth >= 1280));
   const [sceneReady, setSceneReady] = useState(false);
+  const [providers, setProviders] = useState<Provider[]>([]);
+  const [prices, setPrices] = useState<Prices | null>(null);
+  const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const [usage, setUsage] = useState<Usage | null>(null);
 
   // Opening a panel zooms the camera onto who you're talking to; closing zooms out.
   const openDialog = useCallback((id: InteractId | null) => {
@@ -114,6 +124,22 @@ export default function App() {
   }, [openDialog]);
 
 
+  // What this machine offers (AIs with keys, their models and prices), once connected.
+  useEffect(() => {
+    if (SOURCE !== "ws" || !state.connected) return;
+    api.providers().then(setProviders).catch(() => setProviders([]));
+    api.prices().then(setPrices).catch(() => setPrices(null));
+  }, [state.connected]);
+
+  // Saved sessions and all-time usage: on load, when a session starts, and when one ends.
+  const jobId = state.currentJob?.jobId ?? null;
+  useEffect(() => {
+    if (SOURCE !== "ws") return;
+    api.sessions().then(setSessions).catch(() => undefined);
+    api.usage().then(setUsage).catch(() => undefined);
+  }, [state.connected, jobId, state.history.length]);
+
+  const send = SOURCE === "ws" ? (message: ClientMsg) => sourceRef.current?.send?.(message) ?? false : undefined;
   const badge = modeBadge(state);
 
   return (
@@ -122,11 +148,11 @@ export default function App() {
         <header className="stage-header">
           <div className="title">
             <strong>ABYSS</strong>
-            <small>Live view. Give jobs and steer from the terminal: python -m abyss.chat. Click anyone here to zoom in and watch.</small>
+            <small>Click the Captain on the boat to start a session. Click anyone else to zoom in and watch.</small>
           </div>
           <div className="header-actions">
             <button type="button" className="ledger-toggle" onClick={() => setShowLedger((v) => !v)}>
-              {showLedger ? "Hide ledger" : "Show ledger"}
+              {showLedger ? (rawLedger ? "Hide ledger" : "Hide costs") : rawLedger ? "Show ledger" : "Costs"}
             </button>
             <span className={`mode-badge ${badge.tone}`}>{badge.label}</span>
           </div>
@@ -139,11 +165,24 @@ export default function App() {
             </div>
           )}
           {dialog && (
-            <GameDialog key={dialog} id={dialog} state={state} onClose={() => openDialog(null)} />
+            <GameDialog
+              key={dialog}
+              id={dialog}
+              state={state}
+              onClose={() => openDialog(null)}
+              send={send}
+              providers={providers}
+              sessions={sessions}
+            />
           )}
         </div>
       </section>
-      {showLedger && <DebugPanel state={state} />}
+      {showLedger &&
+        (rawLedger || SOURCE !== "ws" ? (
+          <DebugPanel state={state} />
+        ) : (
+          <CostPanel state={state} prices={prices} usage={usage} sessions={sessions} onClose={() => setShowLedger(false)} />
+        ))}
     </main>
   );
 }
