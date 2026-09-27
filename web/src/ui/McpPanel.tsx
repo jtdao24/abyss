@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, type McpCatalogEntry, type McpOverview, type McpServer } from "../api";
 import type { AgentId } from "../contract";
 import { VENDOR } from "../scene/model";
 import { McpLogo } from "./mcpLogos";
+import { usePolling } from "./usePolling";
 
 const STATE_LABEL: Record<string, string> = {
   ready: "Connected",
@@ -17,7 +18,11 @@ function useMcp(): [McpOverview | null, string | null, (run: () => Promise<McpOv
   const [view, setView] = useState<McpOverview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Bumped by every change you make, so a poll that was already on its way
+  // can't put back the list from before your change.
+  const generation = useRef(0);
   const run = useCallback(async (call: () => Promise<McpOverview>) => {
+    generation.current += 1;
     setBusy(true);
     setError(null);
     try {
@@ -32,10 +37,12 @@ function useMcp(): [McpOverview | null, string | null, (run: () => Promise<McpOv
   }, []);
   useEffect(() => {
     void run(api.mcp);
-    // Servers start in the background and tool calls stream in: keep it fresh.
-    const timer = window.setInterval(() => api.mcp().then(setView).catch(() => undefined), 4000);
-    return () => window.clearInterval(timer);
   }, [run]);
+  // Servers start in the background and tool calls stream in: keep it fresh.
+  usePolling(() => {
+    const asked = generation.current;
+    api.mcp().then((v) => asked === generation.current && setView(v)).catch(() => undefined);
+  }, 4000);
   return [view, error, run, busy];
 }
 

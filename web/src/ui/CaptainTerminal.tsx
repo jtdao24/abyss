@@ -1,6 +1,6 @@
 // The Captain is a terminal: type a job (or a /command) at the prompt and the
 // market streams its progress back, line by line, like `python -m abyss.chat`.
-import { useEffect, useLayoutEffect, useReducer, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
 
 import { sfx } from "../audio/sfx";
 import { api, type Attachment, type McpServer, type Provider, type SessionRecord, type SessionSummary } from "../api";
@@ -172,7 +172,8 @@ interface Props {
 }
 
 export function CaptainTerminal({ state, onClose, send, providers = [], sessions = [] }: Props) {
-  const [, rerender] = useReducer((n: number) => n + 1, 0);
+  // `version` changes whenever your own lines do (they live outside React state).
+  const [version, rerender] = useReducer((n: number) => n + 1, 0);
   const [input, setInput] = useState("");
   const [historyAt, setHistoryAt] = useState<number | null>(null);
   const screen = useRef<HTMLDivElement | null>(null);
@@ -521,38 +522,8 @@ export function CaptainTerminal({ state, onClose, send, providers = [], sessions
   };
 
   // Scrollback: every event's lines, with your own lines placed after the event they followed.
-  const rows: ReactNode[] = [];
-  const localByEvent = new Map<AbyssEvent | null, Local[]>();
-  const shownEvents = new Set(state.log);
-  for (const l of term.local) {
-    if (l.id < term.clearedAfterId) continue;
-    const key = l.after && shownEvents.has(l.after) ? l.after : null;
-    localByEvent.set(key, [...(localByEvent.get(key) ?? []), l]);
-  }
-  const pushLines = (key: string, lines: Line[]) =>
-    lines.forEach((line, i) =>
-      rows.push(
-        <div key={`${key}-${i}`} className={`t-${line.tone}`}>
-          {line.text || " "}
-          {line.action && (
-            <button type="button" className="ct-action" onClick={line.action.run}>
-              {line.action.label}
-            </button>
-          )}
-        </div>,
-      ),
-    );
-  const ctx: Context = {
-    stopped: stoppedJobs(state.log),
-    said: new Set(),
-    jobText: new Map(state.log.filter((e) => e.type === "job_split" && e.job_id).map((e) => [e.job_id!, (e.data as { job_text: string }).job_text])),
-  };
-  localByEvent.get(null)?.forEach((l) => pushLines(`l${l.id}`, l.lines));
-  const clearedAt = term.clearedAfterEvent ? state.log.indexOf(term.clearedAfterEvent) : -1;
-  state.log.forEach((ev, index) => {
-    if (index > clearedAt) pushLines(`e${eventKey(ev)}`, describe(ev, ctx));
-    localByEvent.get(ev)?.forEach((l) => pushLines(`l${l.id}`, l.lines));
-  });
+  // Rebuilt only when the log or your lines change, not on every keystroke.
+  const rows = useMemo(() => scrollback(state.log), [state.log, version]);
 
   return (
     <div ref={dialog} className="rpg-dialog captain-term" role="dialog" aria-label="Captain terminal" onPointerDown={(e) => e.stopPropagation()}>
@@ -621,4 +592,41 @@ export function CaptainTerminal({ state, onClose, send, providers = [], sessions
       />
     </div>
   );
+}
+
+/** Every event's lines, with your own lines placed after the event they followed. */
+function scrollback(log: AbyssEvent[]): ReactNode[] {
+  const rows: ReactNode[] = [];
+  const localByEvent = new Map<AbyssEvent | null, Local[]>();
+  const shownEvents = new Set(log);
+  for (const l of term.local) {
+    if (l.id < term.clearedAfterId) continue;
+    const key = l.after && shownEvents.has(l.after) ? l.after : null;
+    localByEvent.set(key, [...(localByEvent.get(key) ?? []), l]);
+  }
+  const pushLines = (key: string, lines: Line[]) =>
+    lines.forEach((line, i) =>
+      rows.push(
+        <div key={`${key}-${i}`} className={`t-${line.tone}`}>
+          {line.text || " "}
+          {line.action && (
+            <button type="button" className="ct-action" onClick={line.action.run}>
+              {line.action.label}
+            </button>
+          )}
+        </div>,
+      ),
+    );
+  const ctx: Context = {
+    stopped: stoppedJobs(log),
+    said: new Set(),
+    jobText: new Map(log.filter((e) => e.type === "job_split" && e.job_id).map((e) => [e.job_id!, (e.data as { job_text: string }).job_text])),
+  };
+  localByEvent.get(null)?.forEach((l) => pushLines(`l${l.id}`, l.lines));
+  const clearedAt = term.clearedAfterEvent ? log.indexOf(term.clearedAfterEvent) : -1;
+  log.forEach((ev, index) => {
+    if (index > clearedAt) pushLines(`e${eventKey(ev)}`, describe(ev, ctx));
+    localByEvent.get(ev)?.forEach((l) => pushLines(`l${l.id}`, l.lines));
+  });
+  return rows;
 }

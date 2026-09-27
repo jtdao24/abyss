@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { sfx } from "../audio/sfx";
 import { api, type LimitPeriod, type LimitsStatus } from "../api";
+import { usePolling } from "./usePolling";
 
 const SHORT: Record<LimitPeriod["period"], string> = { day: "Today", week: "Week", month: "Month" };
 const money = (v: number) => (v < 10 ? `$${v.toFixed(2)}` : `$${v.toFixed(0)}`);
@@ -20,12 +21,7 @@ export function SpendMeter({ refreshKey }: { refreshKey: unknown }) {
   const [error, setError] = useState<string | null>(null);
   const pill = useRef<HTMLButtonElement | null>(null);
 
-  useEffect(() => {
-    const load = () => api.limits().then(setStatus).catch(() => undefined);
-    void load();
-    const timer = window.setInterval(load, 5000);
-    return () => window.clearInterval(timer);
-  }, [refreshKey]);
+  usePolling(() => void api.limits().then(setStatus).catch(() => undefined), 5000, [refreshKey]);
 
   // Alarm once when spending crosses a limit (not on load if already over).
   const wasOver = useRef<boolean | null>(null);

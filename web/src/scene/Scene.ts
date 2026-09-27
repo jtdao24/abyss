@@ -157,6 +157,8 @@ export class MarketScene {
   private readonly hover = new Graphics();
   private hoverLabel!: Text;
   private hovered: Interactable | "tasks" | null = null;
+  /** The latest pointer position, handled once per frame (pointermove fires far more often). */
+  private pendingHover: Point | null = null;
   private readonly clickRing = new Graphics();
   private clickAge = Infinity;
   private walk: Point[] = [];
@@ -405,7 +407,7 @@ export class MarketScene {
     this.world.eventMode = "static";
     this.world.hitArea = new Rectangle(0, 0, WORLD.w, WORLD.h);
     this.world.on("pointertap", (e: FederatedPointerEvent) => this.click(this.world.toLocal(e.global)));
-    this.world.on("pointermove", (e: FederatedPointerEvent) => this.setHover(this.world.toLocal(e.global)));
+    this.world.on("pointermove", (e: FederatedPointerEvent) => (this.pendingHover = this.world.toLocal(e.global)));
     this.app.ticker.add(this.tick);
   }
 
@@ -470,7 +472,10 @@ export class MarketScene {
   private setHover(p: Point): void {
     // Vendors move, so their box is rebuilt on every call (and the outline follows them).
     const thing = inPanel(p) ? "tasks" : hitTest(p, this.vendorPositions());
-    if (thing === this.hovered) return;
+    const id = (t: typeof thing) => (t === null ? null : t === "tasks" ? "tasks" : t.id);
+    // Same person, same spot: nothing to redraw. (A vendor's box is a new
+    // object each call, so compare who it is and where, not the object.)
+    if (id(thing) === id(this.hovered) && (thing === null || thing === "tasks" || this.hovered === null || this.hovered === "tasks" || thing.hit.join() === this.hovered.hit.join())) return;
     this.hovered = thing;
     this.app.canvas.style.cursor = thing ? "pointer" : "default";
     this.hover.clear();
@@ -486,6 +491,10 @@ export class MarketScene {
   private readonly tick = (ticker: Ticker): void => {
     this.clock += ticker.deltaMS;
     this.stepCamera(ticker.deltaMS);
+    if (this.pendingHover) {
+      this.setHover(this.pendingHover);
+      this.pendingHover = null;
+    }
     this.ambient.update(ticker);
     this.stepPlayer(ticker.deltaMS);
     // the main agent rides the boat's gentle bob

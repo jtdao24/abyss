@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 
 import { installAudioUnlock, isMuted, onMarketEvent, onMutedChange, setMuted, sfx } from "./audio/sfx";
 import { api, type Prices, type Provider, type SessionSummary, type Usage } from "./api";
@@ -14,7 +14,6 @@ import { isReplay, type MarketState } from "./state/reducer";
 import { store } from "./state/store";
 import { CostCompare } from "./ui/CostCompare";
 import { CostPanel } from "./ui/CostPanel";
-import { McpPanel } from "./ui/McpPanel";
 import { ResultPanel } from "./ui/ResultPanel";
 import { openResult, resultDoc, stoppedJobs } from "./ui/resultView";
 import { SpendMeter } from "./ui/SpendMeter";
@@ -28,6 +27,9 @@ const SOURCE = params.get("source") === "fixture" ? "fixture" : "ws"; // live by
 const WS_URL = import.meta.env.VITE_WS_URL ?? `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/ws`;
 const parsedSpeed = Number(params.get("speed") || "1");
 const SPEED = SOURCE === "fixture" && Number.isFinite(parsedSpeed) && parsedSpeed > 0 ? parsedSpeed : 1;
+// The Tools panel (and its catalog and logos) loads when you first open it.
+const McpPanel = lazy(() => import("./ui/McpPanel").then((m) => ({ default: m.McpPanel })));
+
 /** Everyone you can walk up to on the boardwalk, for the keyboard. */
 const PEOPLE: [InteractId, string][] = [
   ["main", "Captain"],
@@ -334,7 +336,11 @@ export default function App() {
           </div>
         </div>
       </section>
-      {showTools && !showLedger && <McpPanel onClose={() => setShowTools(false)} />}
+      {showTools && !showLedger && (
+        <Suspense fallback={<aside className="cost-panel mcp-panel" aria-label="Tools (MCP servers)" aria-busy="true" />}>
+          <McpPanel onClose={() => setShowTools(false)} />
+        </Suspense>
+      )}
       <ResultPanel />
       {showLedger &&
         (rawLedger || SOURCE !== "ws" ? (
