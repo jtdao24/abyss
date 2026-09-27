@@ -95,6 +95,22 @@ export interface VendorStats {
   history: Record<string, { job_id: string; t: number | null; value: number; ratio: number }[]>;
 }
 
+export interface LimitPeriod {
+  period: "day" | "week" | "month";
+  limit: number | null;
+  spent: number;
+  pct: number | null;
+  state: "none" | "ok" | "warn" | "over";
+  resets_at: number;
+}
+
+export interface LimitsStatus {
+  periods: LimitPeriod[];
+  remaining_usd: number | null;
+  blocked: boolean;
+  message: string | null;
+}
+
 export interface McpServer {
   name: string;
   catalog: string | null;
@@ -175,6 +191,8 @@ export const api = {
   attachFile: async (file: File) => postJson<Attachment>("/api/attachments", { name: file.name, data_base64: await fileToBase64(file) }),
   attachLink: (url: string) => postJson<Attachment>("/api/attachments", { url }),
   vendors: () => getJson<{ vendors: Record<string, VendorStats>; sessions: number }>("/api/vendors"),
+  limits: () => getJson<LimitsStatus>("/api/limits"),
+  setLimits: (body: Partial<Record<"day" | "week" | "month", number | null>>) => postJson<LimitsStatus>("/api/limits", body),
   mcp: () => getJson<McpOverview>("/api/mcp"),
   mcpAdd: (body: {
     catalog_id?: string;

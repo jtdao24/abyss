@@ -702,3 +702,36 @@ b.top, i.top { background: var(--abyss-muted); }
 .mcp-activity small { font-size: 9px; white-space: nowrap; }
 .mcp-custom-wrap summary { display: flex; align-items: center; gap: 8px; list-style: none; }
 .mcp-custom-wrap summary::-webkit-details-marker { display: none; }
+
+/* ---- spend meter (bottom-right of the stage) ---- */
+.spend-meter { position: absolute; right: 10px; bottom: 10px; z-index: 5; display: grid; justify-items: end; gap: 6px; }
+.spend-pill {
+  display: grid; gap: 4px; padding: 5px 10px; color: var(--abyss-text-soft); background: rgba(6, 18, 28, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 999px; cursor: pointer; backdrop-filter: blur(4px);
+  font: 10px var(--font-mono);
+}
+.spend-pill:hover { color: var(--abyss-text); border-color: rgba(255, 255, 255, 0.28); }
+.spend-pill em { color: var(--abyss-text-dim); font-style: normal; }
+.spend-bar { display: block; height: 3px; overflow: hidden; background: rgba(255, 255, 255, 0.12); border-radius: 2px; }
+.spend-bar b { display: block; height: 100%; background: var(--abyss-good-soft); transition: width 300ms ease; }
+.spend-pill.warn { color: var(--abyss-gold); }
+.spend-pill.warn .spend-bar b { background: var(--abyss-gold); }
+.spend-pill.over { color: #ffb4a8; border-color: var(--abyss-bad); }
+.spend-pill.over .spend-bar b { background: var(--abyss-bad); }
+.spend-pop {
+  display: grid; gap: 6px; width: 200px; padding: 10px; color: var(--abyss-text); background: rgba(6, 18, 28, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 10px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  font: 10px var(--font-mono);
+}
+.spend-pop strong { color: var(--abyss-gold); font-size: 11px; }
+.spend-pop label { display: grid; grid-template-columns: 44px 1fr 64px; align-items: center; gap: 6px; }
+.spend-pop small { color: var(--abyss-text-dim); font-size: 9px; }
+.spend-pop input {
+  width: 100%; box-sizing: border-box; padding: 3px 6px; color: var(--abyss-text); background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.16); border-radius: 4px; font: 10px var(--font-mono); text-align: right;
+}
+.spend-hint { margin: 0; color: var(--abyss-text-dim); font-size: 9px; }
+.spend-pop button {
+  justify-self: end; padding: 3px 12px; color: var(--abyss-ink-text); background: var(--abyss-gold); border: 0;
+  border-radius: 999px; cursor: pointer; font: 700 10px var(--font-mono);
+}
