@@ -7,13 +7,13 @@ export function CostCompare({ state }: { state: MarketState }) {
   if (!cmp) {
     return (
       <div className="cost-compare idle">
-        <span>vs top model</span>
+        <span>Cost vs top model</span>
         <small>{state.config && !state.config.prices ? "no prices in this recording" : "after the first task"}</small>
       </div>
     );
   }
   const delta = describeDelta(cmp.delta);
-  const max = Math.max(cmp.abyss, cmp.baseline);
+  const share = cmp.baseline > 0 ? Math.min(100, (cmp.abyss / cmp.baseline) * 100) : 100;
   return (
     <div
       className="cost-compare"
@@ -23,17 +23,13 @@ export function CostCompare({ state }: { state: MarketState }) {
         `(same work tokens at ${cmp.topName} rates, same planning and review, no bidding).`
       }
     >
-      <div className="cc-rows">
-        <div>
-          <span>Abyss</span>
-          <i><b className="abyss" style={{ width: `${(cmp.abyss / max) * 100}%` }} /></i>
+      <div className="cc-figures">
+        <div className="cc-line">
+          <span>This job</span>
           <strong>{formatUsd(cmp.abyss)}</strong>
+          <span className="cc-vs">vs {cmp.topName} alone ≈{formatUsd(cmp.baseline)}</span>
         </div>
-        <div>
-          <span>{cmp.topName} only</span>
-          <i><b className="top" style={{ width: `${(cmp.baseline / max) * 100}%` }} /></i>
-          <strong>≈{formatUsd(cmp.baseline)}</strong>
-        </div>
+        <i className="cc-bar"><b style={{ width: `${share}%` }} /></i>
       </div>
       <em className={`cc-delta ${delta.tone}`}>{delta.text}</em>
     </div>

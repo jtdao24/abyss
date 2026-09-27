@@ -54,6 +54,19 @@ function modeBadge(state: MarketState): { label: string; tone: string } {
   return { label: `${prefix}LIVE`, tone: "live" };
 }
 
+function SoundIcon({ muted }: { muted: boolean }) {
+  return (
+    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+      <path d="M2 6h3l4-3v10L5 10H2z" fill="currentColor" />
+      {muted ? (
+        <path d="M11 6l4 4M15 6l-4 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      ) : (
+        <path d="M11 5.5a3.5 3.5 0 0 1 0 5M12.8 3.5a6 6 0 0 1 0 9" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" />
+      )}
+    </svg>
+  );
+}
+
 export default function App() {
   const [state, setState] = useState(store.getState());
   const [dialog, setDialog] = useState<InteractId | null>(null);
@@ -161,11 +174,16 @@ export default function App() {
     <main className={`app-shell ${showLedger || showTools ? "" : "ledger-hidden"}`}>
       <section className="stage-shell" aria-label="Abyss boardwalk market">
         <header className="stage-header">
-          <div className="title">
-            <strong>ABYSS</strong>
-            <small>Click the Captain on the boat to open the terminal and type a job (python start.py --chat works too). Click anyone to zoom in.</small>
+          <div className="brand">
+            <strong className="wordmark">ABYSS</strong>
+            <span className={`mode-badge ${badge.tone}`}>
+              <i aria-hidden="true" />
+              {badge.label}
+            </span>
           </div>
-          <div className="header-actions">
+          <p className="header-hint">Click the Captain on the boat to give a job · click anyone to zoom in</p>
+          <CostCompare state={state} />
+          <div className="header-actions" role="toolbar" aria-label="Panels">
             {SOURCE === "ws" && (
               <button
                 type="button"
@@ -176,44 +194,45 @@ export default function App() {
                   setShowLedger(false);
                 }}
               >
-                {showTools ? "Hide tools" : "Tools"}
+                Tools
               </button>
             )}
-            <CostCompare state={state} />
+            <button type="button" className="ledger-toggle" aria-pressed={showLedger} onClick={() => { setShowLedger((v) => !v); setShowTools(false); }}>
+              {rawLedger ? "Ledger" : "Costs"}
+            </button>
             <button
               type="button"
-              className="ledger-toggle"
+              className="ledger-toggle sound-toggle"
               aria-pressed={!muted}
               aria-label={muted ? "Turn sound on" : "Turn sound off"}
+              title={muted ? "Sound off" : "Sound on"}
               onClick={() => setMuted(!muted)}
             >
-              {muted ? "♪ Off" : "♪ On"}
+              <SoundIcon muted={muted} />
             </button>
-            <button type="button" className="ledger-toggle" aria-pressed={showLedger} onClick={() => { setShowLedger((v) => !v); setShowTools(false); }}>
-              {showLedger ? (rawLedger ? "Hide ledger" : "Hide costs") : rawLedger ? "Show ledger" : "Costs"}
-            </button>
-            <span className={`mode-badge ${badge.tone}`}>{badge.label}</span>
           </div>
         </header>
-        <div id="stage" ref={stageRef}>
-          {!sceneReady && (
-            <div className="stage-placeholder">
-              <span>ABYSS MARKET</span>
-              <small>SETTING UP THE BOARDWALK</small>
-            </div>
-          )}
-          {dialog && (
-            <GameDialog
-              key={dialog}
-              id={dialog}
-              state={state}
-              onClose={() => openDialog(null)}
-              send={send}
-              providers={providers}
-              sessions={sessions}
-            />
-          )}
-          {SOURCE === "ws" && <SpendMeter refreshKey={`${jobId}-${state.history.length}`} />}
+        <div className="stage-fit">
+          <div id="stage" ref={stageRef}>
+            {!sceneReady && (
+              <div className="stage-placeholder">
+                <span>ABYSS MARKET</span>
+                <small>SETTING UP THE BOARDWALK</small>
+              </div>
+            )}
+            {dialog && (
+              <GameDialog
+                key={dialog}
+                id={dialog}
+                state={state}
+                onClose={() => openDialog(null)}
+                send={send}
+                providers={providers}
+                sessions={sessions}
+              />
+            )}
+            {SOURCE === "ws" && <SpendMeter refreshKey={`${jobId}-${state.history.length}`} />}
+          </div>
         </div>
       </section>
       {showTools && !showLedger && <McpPanel onClose={() => setShowTools(false)} />}

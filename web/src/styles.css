@@ -77,35 +77,140 @@ th, td { padding: 6px; border-bottom: 1px solid #294658; text-align: left; }
 th { color: #7fb7b6; }
 
 .app-shell.ledger-hidden { grid-template-columns: 1fr; }
-.header-actions { display: flex; align-items: center; gap: 10px; }
-/* Header controls use the readable UI font: the pixel font turns small "C"s into "O"s. */
-.ledger-toggle {
-  padding: 6px 14px;
-  color: var(--abyss-text);
-  background: var(--abyss-bg2);
-  border: 2px solid var(--abyss-line2);
-  border-radius: 6px;
-  cursor: pointer;
-  font: 600 13px var(--font-ui);
-  transition: background 120ms, border-color 120ms;
-}
-.ledger-toggle:hover { background: #1b3a50; border-color: var(--abyss-teal); }
-.ledger-toggle[aria-pressed="true"] { color: var(--abyss-bg0); background: var(--abyss-gold); border-color: var(--abyss-gold-deep); }
+
+/* ---- header bar: brand, hint, cost chip, panel toolbar ---- */
 .stage-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  color: var(--abyss-gold);
-  font-size: 16px;
+  gap: 14px;
+  min-height: 52px;
+  padding: 8px 10px 8px 14px;
+  background: var(--abyss-bg1);
+  border: 2px solid var(--abyss-line2);
+  border-radius: 10px;
+  box-shadow: 0 2px 0 var(--abyss-bg-deep);
 }
-.mode-badge { padding: 5px 10px; font: 700 12px var(--font-ui); letter-spacing: 0.04em; color: var(--abyss-bg0); background: #8eaab7; border-radius: 999px; }
-.mode-badge.live { background: var(--abyss-good-soft); }
-.mode-badge.test { background: var(--abyss-gold-deep); }
-.mode-badge.fake { background: var(--abyss-teal); }
-.mode-badge.offline { color: #fff; background: #a33; }
+.brand { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+.wordmark {
+  color: var(--abyss-gold);
+  font: 400 20px var(--font-pixel);
+  letter-spacing: 0.12em;
+  text-shadow: 2px 2px 0 var(--abyss-bg-deep);
+}
+.mode-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  color: var(--abyss-text);
+  background: var(--abyss-bg-deep);
+  border: 1px solid var(--abyss-line2);
+  border-radius: 999px;
+  font: 700 11px var(--font-ui);
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  --dot: #8eaab7;
+}
+.mode-badge i { width: 7px; height: 7px; border-radius: 50%; background: var(--dot); box-shadow: 0 0 6px var(--dot); }
+.mode-badge.live { --dot: var(--abyss-good-soft); }
+.mode-badge.test { --dot: var(--abyss-gold-deep); }
+.mode-badge.fake, .mode-badge.replay { --dot: var(--abyss-teal); }
+.mode-badge.offline { --dot: var(--abyss-bad); }
+.mode-badge.live i { animation: badge-pulse 2.4s ease-in-out infinite; }
+@keyframes badge-pulse { 50% { opacity: 0.45; } }
+.header-hint {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  color: var(--abyss-text-dim);
+  font: 13px var(--font-ui);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
-.stage-header .title { display: grid; gap: 4px; }
-.stage-header .title small { color: var(--abyss-text-dim); font: 13px var(--font-ui); }
+.cost-compare {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+  height: 36px;
+  padding: 0 6px 0 12px;
+  background: var(--abyss-bg-deep);
+  border: 1px solid var(--abyss-line2);
+  border-radius: 8px;
+  font: 12px var(--font-ui);
+  cursor: help;
+}
+.cost-compare.idle { gap: 8px; padding-right: 12px; color: var(--abyss-text-dim); cursor: default; }
+.cost-compare.idle span { font-weight: 600; color: var(--abyss-teal); }
+.cc-figures { display: grid; gap: 4px; }
+.cc-line { display: flex; align-items: baseline; gap: 6px; white-space: nowrap; }
+.cc-line span { color: var(--abyss-text-dim); }
+.cc-line strong { color: var(--abyss-gold); font-weight: 700; font-variant-numeric: tabular-nums; }
+.cc-line .cc-vs { margin-left: 4px; font-variant-numeric: tabular-nums; }
+.cc-bar { display: block; height: 3px; background: var(--abyss-muted); border-radius: 2px; overflow: hidden; }
+.cc-bar b { display: block; height: 100%; background: var(--abyss-gold); transition: width 400ms ease; }
+.cc-delta {
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-style: normal;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.cc-delta.better { color: #0d2a12; background: var(--abyss-good-soft); }
+.cc-delta.worse { color: #2e1500; background: var(--abyss-warn); }
+.cc-delta.even { color: var(--abyss-bg0); background: var(--abyss-text-dim); }
+b.abyss, i.abyss { background: var(--abyss-gold); }
+b.top, i.top { background: var(--abyss-muted); }
+
+/* One segmented toolbar; the pixel font turns small "C"s into "O"s, so UI font here. */
+.header-actions {
+  display: flex;
+  flex-shrink: 0;
+  margin-left: auto;
+  padding: 3px;
+  gap: 3px;
+  background: var(--abyss-bg-deep);
+  border: 1px solid var(--abyss-line2);
+  border-radius: 8px;
+}
+.ledger-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 30px;
+  padding: 0 14px;
+  color: var(--abyss-text-dim);
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+  font: 600 13px var(--font-ui);
+  transition: background 120ms, color 120ms;
+}
+.ledger-toggle:hover { color: var(--abyss-text); background: var(--abyss-bg2); }
+.ledger-toggle:focus-visible { outline: 2px solid var(--abyss-teal); outline-offset: 1px; }
+.ledger-toggle[aria-pressed="true"] { color: var(--abyss-bg0); background: var(--abyss-gold); }
+.sound-toggle { width: 34px; padding: 0; }
+.sound-toggle[aria-pressed="true"] { color: var(--abyss-gold); background: transparent; }
+.sound-toggle[aria-pressed="true"]:hover { background: var(--abyss-bg2); }
+
+/* Sized by the stage column (it narrows when a drawer opens), not the window. */
+.stage-shell { container: shell / inline-size; }
+@container shell (max-width: 1160px) { .header-hint { display: none; } .brand { flex: 1; } }
+@container shell (max-width: 900px) {
+  .stage-header { flex-wrap: wrap; row-gap: 8px; }
+  .cost-compare { order: 3; flex: 1 1 100%; justify-content: space-between; }
+}
+@container shell (max-width: 520px) {
+  .cc-vs { display: none; }
+  .brand { gap: 8px; }
+  .wordmark { font-size: 16px; letter-spacing: 0.08em; }
+  .stage-header { column-gap: 8px; padding: 8px; }
+  .mode-badge { padding: 3px 8px; font-size: 10px; }
+  .ledger-toggle { padding: 0 9px; }
+}
 
 /* ---- RPG dialog ---- */
 .rpg-dialog {
@@ -252,53 +357,47 @@ th { color: #7fb7b6; }
 @media (min-width: 901px) {
   html, body { overflow: hidden; }
 }
-#stage {
+/* The stage takes the space under the header, but never a shape the art can't
+   fill: the scene crops at most 25% (fit.ts MAX_CROP), so the stage stays between
+   1672/941 x 0.75 and 1672/941 / 0.75 wide-to-tall, centred. No black bars. */
+.stage-fit {
   flex: 1 1 auto;
   min-height: 0;
+  display: grid;
+  place-items: start center;
+  container-type: size;
+}
+#stage {
+  width: min(100cqw, 100cqh * 2.369);
+  height: min(100cqh, 100cqw / 1.3326);
   aspect-ratio: auto;
   max-height: none;
 }
 /* The canvas follows the stage and never sizes it, so shrinking and growing work. */
 #stage .market-canvas { position: absolute; inset: 0; }
 @media (max-width: 900px) {
-  #stage { flex: none; aspect-ratio: 1672 / 941; }
+  .stage-fit { display: block; flex: none; container-type: normal; }
+  #stage { width: 100%; height: auto; aspect-ratio: 1672 / 941; }
+}
+/* Phones: the tallest shape the art still fills, so dialogs get room. */
+@media (max-width: 600px) { #stage { aspect-ratio: 4 / 3; } }
+
+/* Dialogs live inside the stage: on a small stage they take its full height,
+   and the spend meter steps aside so it never covers the Captain's prompt. */
+#stage { container: stage / size; }
+@container stage (max-height: 520px) {
+  #stage .rpg-dialog { bottom: 8px; width: min(760px, calc(100% - 16px)); max-height: calc(100% - 16px); }
+  #stage .rpg-dialog.captain-term { width: min(780px, calc(100% - 16px)); height: calc(100% - 16px); }
+  #stage .rpg-dialog.side { width: min(480px, calc(100% - 16px)); max-height: calc(100% - 16px); }
+  #stage .rpg-dialog.vendor-panel { width: min(400px, calc(100% - 16px)); }
+}
+@container stage (max-width: 1000px) { #stage .rpg-dialog ~ .spend-meter { display: none; } }
+@container stage (max-height: 300px) {
+  #stage .ct-bar { padding: 4px 8px; }
+  #stage .ct-screen { padding: 6px 10px 2px; font-size: 12px; }
+  #stage .ct-prompt { padding: 6px 10px 8px; font-size: 12px; }
 }
 
-/* ---- top bar: Abyss vs the top model alone ---- */
-.stage-header { gap: 16px; }
-.stage-header .title { flex: 1; min-width: 0; }
-.header-actions { flex-shrink: 0; }
-.cost-compare {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 6px 10px;
-  background: var(--abyss-bg1);
-  border: 2px solid var(--abyss-line2);
-  font-family: var(--font-ui);
-  font-size: 12px;
-  cursor: help;
-}
-.cost-compare.idle { gap: 8px; color: var(--abyss-text-dim); cursor: default; }
-.cost-compare.idle span { font-weight: 600; color: var(--abyss-teal); }
-.cc-rows { display: grid; gap: 4px; }
-.cc-rows div { display: grid; grid-template-columns: 104px 80px 62px; align-items: center; gap: 8px; }
-.cc-rows span { color: var(--abyss-text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.cc-rows i { height: 6px; background: var(--abyss-bg-deep); border-radius: 3px; overflow: hidden; }
-.cc-rows i b { display: block; height: 100%; border-radius: 3px; transition: width 400ms ease; }
-.cc-rows strong { text-align: right; color: var(--abyss-text); font-weight: 600; font-variant-numeric: tabular-nums; }
-b.abyss, i.abyss { background: var(--abyss-gold); }
-b.top, i.top { background: var(--abyss-muted); }
-.cc-delta {
-  padding: 4px 8px;
-  border-radius: 999px;
-  font-style: normal;
-  font-weight: 700;
-  white-space: nowrap;
-}
-.cc-delta.better { color: #0d2a12; background: var(--abyss-good-soft); }
-.cc-delta.worse { color: #2e1500; background: var(--abyss-warn); }
-.cc-delta.even { color: var(--abyss-bg0); background: var(--abyss-text-dim); }
 
 /* ---- ledger panel ---- */
 .ledger {
@@ -920,8 +1019,12 @@ b.top, i.top { background: var(--abyss-muted); }
 }
 
 /* ---- terminal stop button ---- */
-.ct-stop {
-  padding: 1px 8px; color: #ffb4a8; background: transparent; border: 1px solid currentColor; border-radius: 4px;
-  cursor: pointer; font: 10px var(--font-mono);
+/* .ct-bar scoped: the bar's generic button rule (18px, no border) must not win. */
+.ct-bar .ct-stop {
+  padding: 2px 8px; color: #ffb4a8; background: transparent; border: 1px solid currentColor; border-radius: 4px;
+  cursor: pointer; font: 11px var(--font-mono); line-height: 1.3; white-space: nowrap;
 }
-.ct-stop:hover { color: #fff; background: var(--abyss-bad); border-color: var(--abyss-bad); }
+.ct-bar .ct-stop:hover { color: #fff; background: var(--abyss-bad); border-color: var(--abyss-bad); }
+.ct-bar em, .ct-bar strong { white-space: nowrap; }
+.ct-bar strong { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+@container stage (max-width: 420px) { #stage .ct-bar strong { display: none; } #stage .ct-bar { gap: 8px; } }
