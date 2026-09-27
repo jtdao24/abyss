@@ -2,6 +2,7 @@
 // what it would have cost to hand every task straight to the priciest stall's
 // model (no auction). Every screen that shows a cost formats it here.
 import type { AgentId, StatsData } from "../contract";
+import { AGENT_ORDER } from "../scene/model";
 import type { MarketState } from "./reducer";
 
 export const PURPOSES = ["split", "bid", "work", "review", "assemble"] as const;
@@ -60,7 +61,7 @@ function priceOf(prices: Prices, model: string, input: number, output: number): 
 /** The stall whose model costs the most per token (the premium tier). */
 function topStall(state: MarketState, prices: Prices): { model: string; name: string } | null {
   let best: { model: string; name: string; rate: number } | null = null;
-  for (const agentId of ["haiku", "sonnet", "opus"] as AgentId[]) {
+  for (const agentId of AGENT_ORDER) {
     const agent = state.agents[agentId];
     if (!agent || !prices[agent.model]) continue;
     const [pin, pout] = prices[agent.model];

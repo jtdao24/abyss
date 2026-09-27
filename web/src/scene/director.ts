@@ -8,9 +8,10 @@
 import { Container, Graphics, type Sprite, type Text, type Ticker } from "pixi.js";
 
 import type { AbyssEvent, AgentId, TaskType } from "../contract";
-import { AGENT_ORDER } from "./model";
+import { AGENT_ORDER, verdict } from "./model";
 import { PALETTE, SPENT_POS, text, type MarketScene } from "./Scene";
 import { MAIN_AGENT_POS, REVIEWER_POS, REVIEW_SPOT, STALLS, WORLD, route, type Point } from "./world";
+import { isStopNote } from "../state/reducer";
 
 const MAX_ACTIVE = 60;    // backlog guard: beyond this, finish every effect instantly
 const WALK_SPEED = 330;   // world px per second at speed 1
@@ -107,8 +108,7 @@ export class Director {
       case "graded": {
         const agentId = ev.data.agent_id;
         const promised = ev.data.promised_quality;
-        const tone = promised === null || ev.data.grade >= promised ? PALETTE.good
-          : ev.data.grade < promised - 1 ? PALETTE.bad : PALETTE.ok;
+        const tone = PALETTE[verdict(ev.data.grade, promised)];
         if (fx) this.floatText(`${ev.data.grade}/10`, tone, REVIEWER_POS.x, REVIEWER_POS.y - 100, 1500, 26);
         this.carrying[agentId].visible = false;
         this.walk(agentId, STALLS[agentId].home);
@@ -133,7 +133,7 @@ export class Director {
         if (ev.data.fatal) this.sendEveryoneHome();
         break;
       case "steered":
-        if (ev.job_id && ev.data.note.startsWith("Stop:")) this.stopped.add(ev.job_id);
+        if (ev.job_id && ev.data.target === "job" && isStopNote(ev.data.note)) this.stopped.add(ev.job_id);
         break;
       case "final":
         if (fx) this.floatText(

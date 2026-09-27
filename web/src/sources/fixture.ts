@@ -1,7 +1,7 @@
 import type { AbyssEvent } from "../contract";
-import type { EventSource } from "./types";
+import type { MarketSource } from "./types";
 
-export class FixtureSource implements EventSource {
+export class FixtureSource implements MarketSource {
   private active = false;
   private controller: AbortController | null = null;
 

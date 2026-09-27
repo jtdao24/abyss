@@ -1,10 +1,9 @@
 import type { Prices, SessionSummary, Usage } from "../api";
 import type { AgentId } from "../contract";
-import { VENDOR } from "../scene/model";
+import { AGENT_ORDER, VENDOR, providerLabel } from "../scene/model";
 import { PURPOSE_LABEL, compareToTopModel, describeDelta, formatTokens as tokens, formatUsd as usd, purposeShares } from "../state/money";
 import type { MarketState } from "../state/reducer";
 
-const STALLS: AgentId[] = ["haiku", "sonnet", "opus"]; // VENDOR 3, 2, 1 (budget first)
 const PURPOSE_COLOR: Record<string, string> = {
   split: "var(--abyss-teal)",
   bid: "var(--abyss-gold-deep)",
@@ -86,7 +85,7 @@ export function CostPanel({
               <div><dt>AI calls</dt><dd>{live.calls}</dd></div>
               <div><dt>Per task</dt><dd>{tasks ? usd(spent / tasks) : "—"}</dd></div>
               <div><dt>Grade</dt><dd>{state.final?.mean_grade != null ? `${state.final.mean_grade}/10` : "—"}</dd></div>
-              <div><dt>AI</dt><dd>{provider === "meta" ? "Muse" : provider === "openai" ? "OpenAI" : "—"}</dd></div>
+              <div><dt>AI</dt><dd>{providerLabel(provider)}</dd></div>
             </dl>
           </>
         )}
@@ -119,7 +118,7 @@ export function CostPanel({
               <tr><th>Stall</th><th>Won</th><th>In / out</th><th>Spent</th><th>Per win</th></tr>
             </thead>
             <tbody>
-              {STALLS.map((id) => {
+              {AGENT_ORDER.map((id) => {
                 const a = live.by_agent[id];
                 const model = provider ? prices?.tiers[provider]?.[id] : null;
                 return (
@@ -175,7 +174,7 @@ export function CostPanel({
               {Object.entries(usage.by_provider).map(([name, p]) => (
                 <li key={name}>
                   <b style={{ background: name === "meta" ? "var(--abyss-checking)" : "var(--abyss-teal)" }} />
-                  {name === "meta" ? "Muse" : name === "openai" ? "OpenAI" : name}
+                  {providerLabel(name)}
                   <span>{usd(p.cost_usd)} · {p.jobs} sessions</span>
                 </li>
               ))}

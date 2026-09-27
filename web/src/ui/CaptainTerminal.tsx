@@ -6,19 +6,12 @@ import { sfx } from "../audio/sfx";
 import { api, type Attachment, type McpServer, type Provider, type SessionRecord, type SessionSummary } from "../api";
 import type { AbyssEvent, AgentId, ClientMsg } from "../contract";
 import { formatUsd } from "../state/money";
-import type { MarketState } from "../state/reducer";
-import { downloadText, openResult, resultDoc, stoppedJobs } from "./resultView";
+import { wasStopped, type MarketState } from "../state/reducer";
+import { describe, weakTasks, type Context, type Line, type Tone } from "./describeEvent";
+import { downloadText, openResult, resultDoc } from "./resultView";
 import { eventKey, nearBottom } from "./terminalScroll";
 import { useDialogFocus } from "./useDialogFocus";
 
-type Tone = "plain" | "dim" | "bold" | "cyan" | "green" | "yellow" | "red" | "echo";
-type Line = { text: string; tone: Tone; action?: { label: string; run: () => void } };
-/** What describe() needs beyond the event: which jobs were stopped, and each job's text. */
-type Context = { stopped: Set<string>; jobText: Map<string, string>; /** jobs whose cut-off was already said once */ said: Set<string> };
-/** Stop and the budget cap end work on purpose: said calmly, not as failures. */
-const CUT_OFF = /^(stopped by you|budget reached)/;
-
-const VENDOR: Record<AgentId, string> = { opus: "Vendor 1", sonnet: "Vendor 2", haiku: "Vendor 3" };
 const STEER_TARGET: Record<string, "job" | AgentId> = {
   "1": "opus", v1: "opus", vendor1: "opus",
   "2": "sonnet", v2: "sonnet", vendor2: "sonnet",
@@ -54,95 +47,6 @@ const HELP: Line[] = [
   ["  /status  /reset  /clear  /exit", "plain"],
   ["  ↑ ↓ recall earlier lines · Esc closes", "dim"],
 ].map(([text, tone]) => ({ text, tone: tone as Tone }));
-
-/** Tasks worth redoing: unfinished, or graded below what the vendor promised. */
-function weakTasks(tasks: { task_id: string; grade: number | null; promised_quality: number | null }[]): string[] {
-  return tasks.filter((t) => t.grade === null || (t.promised_quality !== null && t.grade < t.promised_quality)).map((t) => t.task_id);
-}
-
-/** One event as terminal lines (the same wording as the Python terminal chat). */
-function describe(ev: AbyssEvent, ctx: Context): Line[] {
-  switch (ev.type) {
-    case "hello": {
-      const c = ev.data.config;
-      const mode = c.fake_llm ? "FAKE MODE — no real AI calls" : !c.real_models ? "TEST MODE — every vendor on the budget model" : "LIVE — real models";
-      return [{ text: `connected to the market · ${mode}`, tone: "dim" }];
-    }
-    case "job_split":
-      return [
-        { text: `🧭 Main agent split the job into ${ev.data.tasks.length} tasks:`, tone: "bold" },
-        ...ev.data.tasks.map((t) => ({ text: `   ${t.task_id.toUpperCase()} ${t.type.padEnd(8)} ${t.title}`, tone: "plain" as Tone })),
-      ];
-    case "task_posted":
-      return [{ text: "", tone: "plain" }, { text: `→ ${ev.data.task_id.toUpperCase()} (${ev.data.type}): vendors are walking to the boat to bid`, tone: "cyan" }];
-    case "bid": {
-      const who = VENDOR[ev.data.agent_id];
-      if (!ev.data.ok) {
-        if (CUT_OFF.test(ev.data.error ?? "")) return []; // the task's own line says why
-        const standby = (ev.data.error ?? "").startsWith("standby");
-        return [{ text: `   ${who} ${standby ? "is on standby (backup only)" : "passed"}`, tone: "dim" }];
-      }
-      const cents = ((ev.data.predicted_cost_usd ?? 0) * 100).toFixed(2);
-      return [{ text: `   ${who} bids: promises ${ev.data.promised_quality}/10 for ${cents}¢ — "${ev.data.pitch}"`, tone: "dim" }];
-    }
-    case "won":
-      return [{ text: `   ✓ ${VENDOR[ev.data.agent_id]} wins ${ev.data.task_id.toUpperCase()}`, tone: "bold" }];
-    case "working":
-      return [{ text: `   ${VENDOR[ev.data.agent_id]} is working on it...`, tone: "dim" }];
-    case "done":
-      return [{ text: `   ${VENDOR[ev.data.agent_id]} finished (${ev.data.usage.output_tokens} tokens, ${formatUsd(ev.data.usage.cost_usd)}) → off to the reviewer`, tone: "dim" }];
-    case "graded": {
-      const { grade, promised_quality: promised } = ev.data;
-      const tone: Tone = promised === null || grade >= promised ? "green" : grade < promised - 1 ? "red" : "yellow";
-      return [{ text: `   Reviewer: ${grade}/10${promised !== null ? ` (promised ${promised})` : ""} — ${ev.data.rationale}`, tone }];
-    }
-    case "rep_update": {
-      const delta = ev.data.new - ev.data.old;
-      return [{ text: `   ${VENDOR[ev.data.agent_id]} ${ev.data.task_type} reputation ${ev.data.old.toFixed(3)} → ${ev.data.new.toFixed(3)} ${delta > 0 ? "▲" : delta < 0 ? "▼" : "="}`, tone: "dim" }];
-    }
-    case "steered":
-      if (ev.data.target === "job" && ev.data.note.startsWith("Stop:"))
-        return [{ text: "   ■ Stopping: work already started finishes, no new AI calls start", tone: "yellow" }];
-      return [{ text: `   ✎ noted for ${ev.data.target === "job" ? "every vendor" : VENDOR[ev.data.target]}: "${ev.data.note}" (applies from their next piece of work)`, tone: "yellow" }];
-    case "assembled":
-      return [{ text: "", tone: "plain" }, { text: `📦 Main agent is packaging everything into ${ev.data.filename}`, tone: "bold" }];
-    case "final": {
-      const f = ev.data;
-      const stopped = ev.job_id !== null && ctx.stopped.has(ev.job_id);
-      if (!f.deliverable || !f.filename)
-        return stopped
-          ? [{ text: "■ Stopped before anything was finished: no file.", tone: "yellow" }]
-          : [{ text: `✗ The job ended (${f.status}) without a file.`, tone: "red" }];
-      const open = () => openResult(resultDoc(f, ctx.jobText.get(ev.job_id ?? "") ?? null, stopped));
-      return [
-        { text: "", tone: "plain" },
-        stopped
-          ? { text: `■ Stopped. Your file has what was finished: ${f.filename}`, tone: "yellow", action: { label: "Open file", run: open } }
-          : { text: `✅ Done! Your file is ready: ${f.filename}`, tone: "green", action: { label: "Open file", run: open } },
-        ...(f.summary ? [{ text: `   ${f.summary}`, tone: "plain" as Tone }] : []),
-        { text: `   mean grade ${f.mean_grade ?? "—"}/10 · total cost ${formatUsd(f.total_cost_usd)} · ${(f.duration_ms / 1000).toFixed(1)}s`, tone: "dim" },
-        ...(weakTasks(f.tasks).length
-          ? [{ text: `   /retry sends ${weakTasks(f.tasks).map((id) => id.toUpperCase()).join(", ")} out for bids again and keeps the rest`, tone: "yellow" as Tone }]
-          : []),
-      ];
-    }
-    case "error": {
-      const m = ev.data.message;
-      if (CUT_OFF.test(m)) {
-        // Said once per job; each later task it cut off just gets a short line.
-        const key = ev.job_id ?? "";
-        const draft = /your file is .*/.exec(m)?.[0];
-        if (draft && ctx.said.has(key)) return [{ text: `   ■ Y${draft.slice(1)}`, tone: "yellow" }];
-        if (ctx.said.has(key)) return ev.data.task_id ? [{ text: `   ■ ${ev.data.task_id.toUpperCase()} skipped`, tone: "yellow" }] : [];
-        ctx.said.add(key);
-        return [{ text: `   ■ ${m[0].toUpperCase()}${m.slice(1)}`, tone: "yellow" }];
-      }
-      return [{ text: `   ⚠ ${m}`, tone: "red" }];
-    }
-    default:
-      return [];
-  }
-}
 
 // The terminal outlives its window: closing the Captain and coming back keeps
 // the scrollback, your settings and your command history.
@@ -486,7 +390,7 @@ export function CaptainTerminal({ state, onClose, send, providers = [], sessions
       case "result": {
         const last = [...state.history].reverse().find((h) => h.final.deliverable);
         if (!last) return print({ text: "no finished file yet", tone: "dim" });
-        openResult(resultDoc(last.final, last.jobText, stoppedJobs(state.log).has(last.jobId)));
+        openResult(resultDoc(last.final, last.jobText, wasStopped(state, last.jobId)));
         return print({ text: `opened ${last.final.filename ?? "result.md"}`, tone: "dim" });
       }
       case "save": {
@@ -523,7 +427,7 @@ export function CaptainTerminal({ state, onClose, send, providers = [], sessions
 
   // Scrollback: every event's lines, with your own lines placed after the event they followed.
   // Rebuilt only when the log or your lines change, not on every keystroke.
-  const rows = useMemo(() => scrollback(state.log), [state.log, version]);
+  const rows = useMemo(() => scrollback(state.log, state.stopped), [state.log, state.stopped, version]);
 
   return (
     <div ref={dialog} className="rpg-dialog captain-term" role="dialog" aria-label="Captain terminal" onPointerDown={(e) => e.stopPropagation()}>
@@ -595,7 +499,7 @@ export function CaptainTerminal({ state, onClose, send, providers = [], sessions
 }
 
 /** Every event's lines, with your own lines placed after the event they followed. */
-function scrollback(log: AbyssEvent[]): ReactNode[] {
+function scrollback(log: AbyssEvent[], stopped: string[]): ReactNode[] {
   const rows: ReactNode[] = [];
   const localByEvent = new Map<AbyssEvent | null, Local[]>();
   const shownEvents = new Set(log);
@@ -618,7 +522,7 @@ function scrollback(log: AbyssEvent[]): ReactNode[] {
       ),
     );
   const ctx: Context = {
-    stopped: stoppedJobs(log),
+    stopped: new Set(stopped),
     said: new Set(),
     jobText: new Map(log.filter((e) => e.type === "job_split" && e.job_id).map((e) => [e.job_id!, (e.data as { job_text: string }).job_text])),
   };

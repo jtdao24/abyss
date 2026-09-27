@@ -64,6 +64,22 @@ export interface MarketState {
    * one we already have.
    */
   lastSeq: Record<string, number>;
+  /** Jobs the user stopped this session (their file has what was finished). */
+  stopped: string[];
+}
+
+// How the server says a job was stopped (backend/abyss/server.py and llm.py):
+// a steering note on the job, then "stopped by you" errors for the work it cut.
+export const isStopNote = (note: string): boolean => note.startsWith("Stop:");
+export const isStopError = (message: string): boolean => message.startsWith("stopped by you");
+
+/** Did the user stop this job? */
+export function wasStopped(state: Pick<MarketState, "stopped">, jobId: string | null | undefined): boolean {
+  return jobId != null && state.stopped.includes(jobId);
+}
+
+function markStopped(state: MarketState, jobId: string | null): string[] {
+  return jobId === null || state.stopped.includes(jobId) ? state.stopped : [...state.stopped, jobId];
 }
 
 export const initialState: MarketState = {
@@ -81,6 +97,7 @@ export const initialState: MarketState = {
   history: [],
   steering: [],
   lastSeq: {},
+  stopped: [],
 };
 
 export function setConnected(state: MarketState, connected: boolean): MarketState {
@@ -245,6 +262,7 @@ export function reduce(state: MarketState, ev: AbyssEvent): MarketState {
       if (ev.job_id === null && !ev.data.fatal) return withLog;
       return {
         ...withLog,
+        stopped: isStopError(ev.data.message) ? markStopped(state, ev.job_id) : state.stopped,
         agents: mapAgentStatus(state.agents, () => "idle"),
         jobActive: ev.data.fatal ? false : state.jobActive,
         tasks: ev.data.task_id
@@ -257,6 +275,7 @@ export function reduce(state: MarketState, ev: AbyssEvent): MarketState {
       return {
         ...withLog,
         steering: [...state.steering, { jobId: ev.job_id ?? "", ...ev.data }],
+        stopped: ev.data.target === "job" && isStopNote(ev.data.note) ? markStopped(state, ev.job_id) : state.stopped,
       };
     default:
       console.warn("Unknown Abyss event type", (ev as { type: string }).type);

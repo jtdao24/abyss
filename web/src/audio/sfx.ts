@@ -5,6 +5,7 @@
 // Browsers keep audio locked until the first click or key, so sounds before
 // that are dropped. Muting is remembered per browser.
 import type { AbyssEvent } from "../contract";
+import { verdict } from "../scene/model";
 
 type Wave = "square" | "triangle" | "sawtooth";
 
@@ -238,9 +239,7 @@ export function onMarketEvent(ev: AbyssEvent): void {
       sfx.done(Math.round(ev.data.usage.cost_usd * 1000));
       break;
     case "graded": {
-      const promised = ev.data.promised_quality;
-      const verdict = promised === null || ev.data.grade >= promised ? "good" : ev.data.grade < promised - 1 ? "bad" : "ok";
-      sfx.graded(verdict);
+      sfx.graded(verdict(ev.data.grade, ev.data.promised_quality));
       break;
     }
     case "steered":

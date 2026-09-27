@@ -1,11 +1,11 @@
 import type { AbyssEvent, ClientMsg } from "../contract";
-import type { EventSource } from "./types";
+import type { MarketSource } from "./types";
 
 // Backoff 1s, 2s, 4s, then keep retrying every 4s so a restarted backend
 // reconnects on its own during a demo.
 const MAX_DELAY_MS = 4000;
 
-export class WsSource implements EventSource {
+export class WsSource implements MarketSource {
   private ws: WebSocket | null = null;
   private attempts = 0;
   private timer: number | null = null;

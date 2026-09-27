@@ -4,11 +4,10 @@ import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 
 import { api, type VendorStats } from "../api";
 import type { AbyssEvent, AgentId, ClientMsg, TaskType } from "../contract";
-import { VENDOR, formatCents, isStandby } from "../scene/model";
+import { TASK_TYPES as TYPES, VENDOR, formatCents, isStandby, vendorTitle } from "../scene/model";
 import type { MarketState, TaskView } from "../state/reducer";
 import { useDialogFocus } from "./useDialogFocus";
 
-const TYPES: TaskType[] = ["research", "writing", "checking"];
 const SPRITE: Record<AgentId, string> = { opus: "vendor1", sonnet: "vendor2", haiku: "vendor3" };
 const STEPS = ["Bid", "Won", "Working", "Graded"] as const;
 const QUICK_NOTES = ["Be concise", "Cite sources", "Double-check facts", "Simpler words", "More detail"];
@@ -158,7 +157,7 @@ export function VendorPanel({ agentId, state, onClose, send }: Props) {
           {ack && <span className="vp-say">{ack}</span>}
         </button>
         <div className="vp-id">
-          <strong>{vendor.name.replace("VENDOR", "Vendor")}</strong>
+          <strong>{vendorTitle(agentId)}</strong>
           <small>{agent?.display_name ?? ""} · {vendor.tier.toLowerCase()}</small>
           <span className={`vp-status phase-${phase}`}><i />{PHASE_LABEL[phase]}</span>
         </div>
@@ -217,7 +216,7 @@ function NowTab({ task, agentId, phase, items, state }: { task: TaskView | null;
             {mine && task.grade !== null && <em className={`vp-grade ${task.grade >= 8 ? "good" : task.grade >= 6 ? "ok" : "bad"}`} title={task.rationale ?? ""} aria-label={`Graded ${task.grade} out of 10${task.rationale ? `: ${task.rationale}` : ""}`}>{task.grade}/10</em>}
           </div>
           {bid?.ok && <p className="vp-pitch">"{bid.pitch}" · promised {bid.promised_quality}/10</p>}
-          {phase === "lost" && task.winner && <p className="vp-pitch">{VENDOR[task.winner].name.replace("VENDOR", "Vendor")} won this one.</p>}
+          {phase === "lost" && task.winner && <p className="vp-pitch">{vendorTitle(task.winner)} won this one.</p>}
           {phase === "working" && <div className="working-bar"><i /></div>}
           {mine && task.output && (
             <>

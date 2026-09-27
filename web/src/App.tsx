@@ -8,14 +8,14 @@ import { Director } from "./scene/director";
 import { MarketScene } from "./scene/Scene";
 import type { InteractId } from "./scene/world";
 import { FixtureSource } from "./sources/fixture";
-import type { EventSource } from "./sources/types";
+import type { MarketSource } from "./sources/types";
 import { WsSource } from "./sources/ws";
-import { isReplay, type MarketState } from "./state/reducer";
+import { isReplay, wasStopped, type MarketState } from "./state/reducer";
 import { store } from "./state/store";
 import { CostCompare } from "./ui/CostCompare";
 import { CostPanel } from "./ui/CostPanel";
 import { ResultPanel } from "./ui/ResultPanel";
-import { openResult, resultDoc, stoppedJobs } from "./ui/resultView";
+import { openResult, resultDoc } from "./ui/resultView";
 import { SpendMeter } from "./ui/SpendMeter";
 import { GameDialog } from "./ui/GameDialog";
 import { Ledger } from "./ui/Ledger";
@@ -42,7 +42,7 @@ const PEOPLE: [InteractId, string][] = [
 /** How long after a hello incoming events count as the server's catch-up burst. */
 const CATCH_UP_MS = 400;
 
-function createSource(): EventSource {
+function createSource(): MarketSource {
   if (SOURCE === "ws") {
     return new WsSource(WS_URL, (connected) => store.setConnected(connected));
   }
@@ -119,7 +119,7 @@ export default function App() {
     setDialog(id);
     sceneRef.current?.focus(id === "tasks" ? null : id);
   }, []);
-  const sourceRef = useRef<EventSource | null>(null);
+  const sourceRef = useRef<MarketSource | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
   const directorRef = useRef<Director | null>(null);
   const sceneRef = useRef<MarketScene | null>(null);
@@ -271,7 +271,7 @@ export default function App() {
                 type="button"
                 className="ledger-toggle file-toggle"
                 title={`Open ${lastFile.final.filename ?? "the finished file"}`}
-                onClick={() => openResult(resultDoc(lastFile.final, lastFile.jobText, stoppedJobs(state.log).has(lastFile.jobId)))}
+                onClick={() => openResult(resultDoc(lastFile.final, lastFile.jobText, wasStopped(state, lastFile.jobId)))}
               >
                 File
               </button>
