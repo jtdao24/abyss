@@ -12,7 +12,7 @@ export const MAX_CARDS = 5;
  *  the real model names only appear in the (hidden) ledger panel. */
 export const VENDOR: Record<AgentId, { name: string; tier: string; color: string }> = {
   opus: { name: "VENDOR 1", tier: "PREMIUM", color: THEME.vendorOpus },   // blue stall
-  sonnet: { name: "VENDOR 2", tier: "PREMIUM", color: THEME.vendorSonnet }, // red stall
+  sonnet: { name: "VENDOR 2", tier: "STANDARD", color: THEME.vendorSonnet }, // red stall
   haiku: { name: "VENDOR 3", tier: "BUDGET", color: THEME.vendorHaiku },   // purple stall
 };
 

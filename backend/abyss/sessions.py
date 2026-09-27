@@ -28,12 +28,15 @@ def _safe_id(job_id: str) -> bool:
 class SessionStore:
     def __init__(self, directory: Path | None = None) -> None:
         self.directory = directory or sessions_dir()
-        self._pending: tuple[str, str | None] | None = None  # (job text, provider) until job_split
+        # (job text, provider, budget, attachment names) until the job's job_split names it
+        self._pending: tuple[str, str | None, float | None, list[str]] | None = None
 
     # ------------------------------------------------------------- writing
-    def expect(self, job_text: str, provider: str | None) -> None:
+    def expect(
+        self, job_text: str, provider: str | None, budget_usd: float | None = None, attachments: list[str] | None = None
+    ) -> None:
         """The market is about to start this job; its job_id arrives with job_split."""
-        self._pending = (job_text, provider)
+        self._pending = (job_text, provider, budget_usd, list(attachments or []))
 
     def observe(self, event: dict) -> None:
         job_id = event.get("job_id")
@@ -42,12 +45,16 @@ class SessionStore:
             return
         try:
             if kind == "job_split":
-                text, provider = self._pending or ("", None)
+                text, provider, budget, attached = self._pending or ("", None, None, [])
                 self._pending = None
                 self._write(job_id, {
                     "id": job_id,
                     "job_text": text,
                     "provider": provider or config.provider(),
+                    "budget_usd": budget,
+                    "attachments": attached,
+                    "bids": {},          # agent -> bids actually placed
+                    "rep_updates": [],   # every reputation change, in order
                     "status": "running",
                     "started_at": time.time(),
                     "stats": None,
@@ -55,6 +62,22 @@ class SessionStore:
                 })
             elif kind == "stats":
                 self._update(job_id, stats=event.get("data"))
+            elif kind == "bid" and (event.get("data") or {}).get("ok"):
+                record = self.get(job_id)
+                if record is not None:
+                    agent = event["data"]["agent_id"]
+                    bids = record.setdefault("bids", {})
+                    bids[agent] = bids.get(agent, 0) + 1
+                    self._write(job_id, record)
+            elif kind == "rep_update":
+                record = self.get(job_id)
+                if record is not None:
+                    data = event["data"]
+                    record.setdefault("rep_updates", []).append({
+                        "t": event.get("t"), "task_id": data["task_id"], "agent_id": data["agent_id"],
+                        "task_type": data["task_type"], "old": data["old"], "new": data["new"], "ratio": data["ratio"],
+                    })
+                    self._write(job_id, record)
             elif kind == "final":
                 data = event.get("data") or {}
                 self._update(job_id, final=data, status=data.get("status", "ok"), finished_at=time.time())
@@ -113,6 +136,8 @@ class SessionStore:
                 "filename": final.get("filename"),
                 "started_at": r.get("started_at"),
                 "duration_ms": final.get("duration_ms"),
+                "budget_usd": r.get("budget_usd"),
+                "attachments": r.get("attachments") or [],
             })
         return out
 
@@ -187,4 +212,67 @@ def usage_summary(store: SessionStore, ledger_file: Path | None = None, recent: 
     }
 
 
-__all__ = ["SessionStore", "sessions_dir", "usage_summary", "premium_price", "cost_usd"]
+__all__ = ["SessionStore", "sessions_dir", "usage_summary", "vendor_stats", "premium_price", "cost_usd"]
+
+
+def vendor_stats(store: SessionStore, reputation_now: dict[str, dict[str, float]] | None = None) -> dict:
+    """Each vendor across every saved session: bids, wins, win rate, grades vs
+    what it promised, and its reputation per task type over time (oldest first)."""
+    agents = {a.agent_id: a for a in config.AGENTS}
+    out: dict[str, dict] = {
+        agent_id: {
+            "agent_id": agent_id,
+            "bids": 0,
+            "wins": 0,
+            "win_rate": None,
+            "graded": 0,
+            "avg_grade": None,
+            "avg_promised": None,
+            "by_type": {t: {"wins": 0, "avg_grade": None} for t in config.TASK_TYPES},
+            "reputation": (reputation_now or {}).get(agent_id, {}),
+            "history": {t: [] for t in config.TASK_TYPES},
+        }
+        for agent_id in agents
+    }
+    grades: dict[str, list[int]] = {a: [] for a in agents}
+    promised: dict[str, list[int]] = {a: [] for a in agents}
+    type_grades: dict[tuple[str, str], list[int]] = {}
+    for record in sorted(store.all(), key=lambda r: r.get("started_at") or 0):
+        if "bids" in record:
+            for agent_id, count in (record.get("bids") or {}).items():
+                if agent_id in out:
+                    out[agent_id]["bids"] += count
+        else:
+            # Saved before bids were counted: every vendor bid on each auctioned task.
+            auctioned = sum(1 for t in ((record.get("final") or {}).get("tasks") or []) if t.get("agent_id"))
+            for stats in out.values():
+                stats["bids"] += auctioned
+        for task in ((record.get("final") or {}).get("tasks") or []):
+            agent_id = task.get("agent_id")
+            if agent_id not in out:
+                continue
+            out[agent_id]["wins"] += 1
+            out[agent_id]["by_type"][task["type"]]["wins"] += 1
+            if task.get("grade") is not None:
+                grades[agent_id].append(task["grade"])
+                type_grades.setdefault((agent_id, task["type"]), []).append(task["grade"])
+                if task.get("promised_quality") is not None:
+                    promised[agent_id].append(task["promised_quality"])
+        for update in record.get("rep_updates") or []:
+            if update["agent_id"] in out:
+                out[update["agent_id"]]["history"][update["task_type"]].append(
+                    {"job_id": record["id"], "t": record.get("started_at"), "value": update["new"], "ratio": update["ratio"]}
+                )
+    for agent_id, stats in out.items():
+        if stats["bids"]:
+            stats["win_rate"] = stats["wins"] / stats["bids"]
+        if grades[agent_id]:
+            stats["graded"] = len(grades[agent_id])
+            stats["avg_grade"] = sum(grades[agent_id]) / len(grades[agent_id])
+        if promised[agent_id]:
+            stats["avg_promised"] = sum(promised[agent_id]) / len(promised[agent_id])
+        for task_type in config.TASK_TYPES:
+            values = type_grades.get((agent_id, task_type))
+            if values:
+                stats["by_type"][task_type]["avg_grade"] = sum(values) / len(values)
+    return {"vendors": out, "sessions": len(store.all())}

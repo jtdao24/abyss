@@ -48,6 +48,16 @@ Use them to look things up when that helps the task. Only post, send, create or
 edit anything in those apps when your task brief asks for exactly that, and do it
 once. Say in your answer what you did with a tool."""
 
+WORK_CONTEXT = """
+
+Reference material the client attached (use it; cite it when you rely on it):
+{context}"""
+
+SPLIT_CONTEXT = """
+
+The client attached reference material for the vendors to use: {names}.
+Plan the tasks so the research uses it."""
+
 WORK_GUIDANCE = """
 
 Guidance from the client while the job was running (follow it):

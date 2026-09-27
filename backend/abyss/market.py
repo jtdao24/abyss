@@ -4,12 +4,12 @@ import asyncio
 import time
 from dataclasses import asdict, dataclass, field
 
-from . import config
+from . import config, prompts
 from .agents import build_work_prompt, do_work, est_input_tokens, request_bid
 from .assembler import DEFAULT_FILENAME, assemble
 from .events import EventStream, new_job_id
 from .ledger import Ledger
-from .llm import LLM, LLMError
+from .llm import LLM, MIN_BUDGET_TOKENS, BudgetExceeded, LLMError
 from .orchestrator import TaskSpec, split_job
 from .reputation import ReputationStore
 from .reviewer import review
@@ -53,15 +53,20 @@ async def run_job(
     fixed_agent_id: str | None = None,
     tasks: list[TaskSpec] | None = None,
     guidance: Guidance | None = None,
+    budget_usd: float | None = None,
+    context: str | None = None,
+    context_names: list[str] | None = None,
 ) -> JobResult:
     job_id = new_job_id()
     stream.start_job(job_id)
     started = time.monotonic()
-    ledger = Ledger(job_id, config.ledger_path())
+    ledger = Ledger(job_id, config.ledger_path(), budget_usd)
     tasks_won = {agent.agent_id: 0 for agent in config.AGENTS}
 
     try:
-        task_specs, split_usage = await _get_tasks(llm, ledger, job_text, tasks)
+        # The plan knows material is attached; the vendors' work prompts get the text.
+        split_text = job_text + (prompts.SPLIT_CONTEXT.format(names=", ".join(context_names)) if context_names else "")
+        task_specs, split_usage = await _get_tasks(llm, ledger, split_text, tasks)
     except LLMError as exc:
         await stream.emit(
             "error", {"message": str(exc), "task_id": None, "fatal": True}
@@ -104,7 +109,7 @@ async def run_job(
             for task_id in task.depends_on
             if task_id in outputs
         }
-        system, user = build_work_prompt(job_text, task, dep_outputs, guidance.job if guidance else None)
+        system, user = build_work_prompt(job_text, task, dep_outputs, guidance.job if guidance else None, context)
         estimated_input = est_input_tokens(system, user)
         await stream.emit(
             "task_posted",
@@ -119,6 +124,14 @@ async def run_job(
                 "est_input_tokens": estimated_input,
             },
         )
+
+        # Budget cap (soft): once the session has spent it, no new task starts.
+        # Every vendor passes without a call, so stopping costs nothing.
+        if budget_usd is not None and ledger.total_cost() + _cheapest_call_usd(llm) > budget_usd:
+            await _budget_stop(stream, ledger, tasks_won, task, budget_usd)
+            task_failed = True
+            final_tasks.append(_final_task(task, None, None, None, ledger))
+            continue
 
         if fixed_agent_id is None:
             auction = await _run_auction(
@@ -165,7 +178,7 @@ async def run_job(
         notes = guidance.for_agent(winner.agent_id) if guidance else []
         try:
             output, work_usage = await _work_with_retry(
-                llm, ledger, winner, job_text, task, dep_outputs, notes
+                llm, ledger, winner, job_text, task, dep_outputs, notes, context
             )
         except LLMError as exc:
             task_failed = True
@@ -273,6 +286,8 @@ async def _package(
             )
         except (LLMError, ValueError) as exc:
             last_error = str(exc)
+            if isinstance(exc, BudgetExceeded):
+                break
             continue
         await stream.emit("assembled", {"filename": filename, "summary": summary, "usage": usage})
         await stream.emit("stats", ledger.stats(tasks_won))
@@ -431,13 +446,15 @@ async def _work_with_retry(
     task: TaskSpec,
     dep_outputs: dict[str, str],
     notes: list[str],
+    context: str | None = None,
 ) -> tuple[str, dict]:
     for attempt in range(2):
         try:
-            return await do_work(llm, ledger, agent, job_text, task, dep_outputs, notes)
+            return await do_work(llm, ledger, agent, job_text, task, dep_outputs, notes, context)
         except LLMError as exc:
             # A tool may already have posted or edited something: never do that twice.
-            if attempt == 1 or exc.tools_ran:
+            # Out of budget: another attempt can't be paid for either.
+            if attempt == 1 or exc.tools_ran or isinstance(exc, BudgetExceeded):
                 raise
     raise AssertionError("unreachable")
 
@@ -454,10 +471,51 @@ async def _review_with_retry(
     for attempt in range(2):
         try:
             return await review(llm, ledger, job_text, task, dep_outputs, output, notes)
-        except LLMError:
-            if attempt == 1:
+        except LLMError as exc:
+            if attempt == 1 or isinstance(exc, BudgetExceeded):
                 raise
     raise AssertionError("unreachable")
+
+
+def _cheapest_call_usd(llm: LLM) -> float:
+    """The least a useful call can cost on this session's AI (MIN_BUDGET_TOKENS of
+    output on its cheapest model): below that, no task can make progress."""
+    provider_name = getattr(llm, "provider_name", None) or config.provider()
+    prices = [
+        config.PRICES.get(config.served_model(provider_name, agent.model), config.FALLBACK_PRICE)[1]
+        for agent in config.AGENTS
+    ]
+    return MIN_BUDGET_TOKENS * min(prices) / 1_000_000
+
+
+async def _budget_stop(
+    stream: EventStream,
+    ledger: Ledger,
+    tasks_won: dict[str, int],
+    task: TaskSpec,
+    budget_usd: float,
+) -> None:
+    """End a task before any call: each vendor passes, then a (non-fatal) error."""
+    message = f"budget reached: ${ledger.total_cost():.4f} of ${budget_usd:.4f} spent"
+    for agent in config.AGENTS:
+        await stream.emit(
+            "bid",
+            {
+                "task_id": task.task_id,
+                "agent_id": agent.agent_id,
+                "ok": False,
+                "error": message,
+                "predicted_output_tokens": None,
+                "est_input_tokens": None,
+                "predicted_cost_usd": None,
+                "promised_quality": None,
+                "pitch": None,
+                "reputation": None,
+                "score": None,
+                "usage": None,
+            },
+        )
+    await _task_error(stream, ledger, tasks_won, task.task_id, message)
 
 
 async def _task_error(
