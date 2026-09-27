@@ -202,5 +202,6 @@ export type AbyssEvent =
 export type ClientMsg =
   | { type: "start_job"; job: string; price_weight?: number; provider?: string; budget_usd?: number; attachments?: string[]; tools?: string[]; queue?: boolean }
   | { type: "stop_job" }
+  | { type: "retry_task"; session_id: string; task_ids: string[]; budget_usd?: number; queue?: boolean }
   | { type: "reset" }
   | { type: "steer"; target: "job" | AgentId; note: string };
