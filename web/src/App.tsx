@@ -10,7 +10,7 @@ import type { InteractId } from "./scene/world";
 import { FixtureSource } from "./sources/fixture";
 import type { EventSource } from "./sources/types";
 import { WsSource } from "./sources/ws";
-import type { MarketState } from "./state/reducer";
+import { isReplay, type MarketState } from "./state/reducer";
 import { store } from "./state/store";
 import { CostCompare } from "./ui/CostCompare";
 import { CostPanel } from "./ui/CostPanel";
@@ -28,6 +28,8 @@ const SOURCE = params.get("source") === "fixture" ? "fixture" : "ws"; // live by
 const WS_URL = import.meta.env.VITE_WS_URL ?? `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/ws`;
 const parsedSpeed = Number(params.get("speed") || "1");
 const SPEED = SOURCE === "fixture" && Number.isFinite(parsedSpeed) && parsedSpeed > 0 ? parsedSpeed : 1;
+/** How long after a hello incoming events count as the server's catch-up burst. */
+const CATCH_UP_MS = 400;
 
 function createSource(): EventSource {
   if (SOURCE === "ws") {
@@ -134,10 +136,18 @@ export default function App() {
     const unsubscribe = store.subscribe(() => setState(store.getState()));
     const source = createSource();
     sourceRef.current = source;
+    // Right after a hello the server sends the current (or last) job's events
+    // so far. Events we already had are dropped by the reducer; new ones in
+    // that burst are caught up quietly (no sounds or fanfares).
+    let catchUpUntil = 0;
     source.start((event) => {
+      const replay = isReplay(store.getState(), event);
       store.dispatch(event);
-      directorRef.current?.onEvent(event);
-      onMarketEvent(event);
+      if (event.type === "hello" && SOURCE === "ws") catchUpUntil = performance.now() + CATCH_UP_MS;
+      if (replay) return;
+      const quiet = event.type !== "hello" && performance.now() < catchUpUntil;
+      directorRef.current?.onEvent(event, quiet);
+      if (!quiet) onMarketEvent(event);
     });
     return () => {
       source.stop();

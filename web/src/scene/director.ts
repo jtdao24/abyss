@@ -59,10 +59,17 @@ export class Director {
     for (const agentId of AGENT_ORDER) this.stopWork(agentId);
   }
 
-  onEvent(ev: AbyssEvent): void {
+  /**
+   * Play one event. `quiet` is for catching up (a tab that joins mid-job, or
+   * after a reconnect): keep track of who is carrying and working, but skip
+   * the one-off effects (bursts, coins, floating text) so a backlog doesn't
+   * fire every fanfare at once.
+   */
+  onEvent(ev: AbyssEvent, quiet = false): void {
+    const fx = !quiet;
     switch (ev.type) {
       case "job_split":
-        this.floatText("NEW JOB!", PALETTE.gold, MAIN_AGENT_POS.x, MAIN_AGENT_POS.y - 90, 1300, 20);
+        if (fx) this.floatText("NEW JOB!", PALETTE.gold, MAIN_AGENT_POS.x, MAIN_AGENT_POS.y - 90, 1300, 20);
         break;
       case "task_posted":
         this.taskTypes.set(ev.data.task_id, ev.data.type);
@@ -71,13 +78,13 @@ export class Director {
       case "bid":
         if (ev.data.ok) {
           const v = this.scene.vendors[ev.data.agent_id];
-          this.burst(v.x, v.y - 60, PALETTE.paper, 22);
+          if (fx) this.burst(v.x, v.y - 60, PALETTE.paper, 22);
         }
         break;
       case "won": {
         const v = this.scene.vendors[ev.data.agent_id];
-        this.burst(v.x, v.y - 40, PALETTE.gold, 40);
-        this.floatText("GOT IT!", PALETTE.gold, v.x, v.y - 90, 1200, 18);
+        if (fx) this.burst(v.x, v.y - 40, PALETTE.gold, 40);
+        if (fx) this.floatText("GOT IT!", PALETTE.gold, v.x, v.y - 90, 1200, 18);
         this.carrying[ev.data.agent_id].visible = true;
         for (const agentId of AGENT_ORDER) this.walk(agentId, STALLS[agentId].home);
         break;
@@ -93,7 +100,7 @@ export class Director {
         this.carrying[agentId].visible = true;
         const coins = Math.max(1, Math.min(14, Math.round(ev.data.usage.cost_usd * 1000)));
         const home = STALLS[agentId].home;
-        for (let i = 0; i < coins; i += 1) this.coin(home.x, home.y - 40, i * 70);
+        if (fx) for (let i = 0; i < coins; i += 1) this.coin(home.x, home.y - 40, i * 70);
         this.walk(agentId, REVIEW_SPOT);
         break;
       }
@@ -102,7 +109,7 @@ export class Director {
         const promised = ev.data.promised_quality;
         const tone = promised === null || ev.data.grade >= promised ? PALETTE.good
           : ev.data.grade < promised - 1 ? PALETTE.bad : PALETTE.ok;
-        this.floatText(`${ev.data.grade}/10`, tone, REVIEWER_POS.x, REVIEWER_POS.y - 100, 1500, 26);
+        if (fx) this.floatText(`${ev.data.grade}/10`, tone, REVIEWER_POS.x, REVIEWER_POS.y - 100, 1500, 26);
         this.carrying[agentId].visible = false;
         this.walk(agentId, STALLS[agentId].home);
         break;
@@ -112,7 +119,7 @@ export class Director {
         if (Math.abs(delta) < 0.0005) break;
         const sign = STALLS[ev.data.agent_id].sign;
         const label = `${delta > 0 ? "+" : ""}${delta.toFixed(3)} ${ev.data.task_type.toUpperCase()}`;
-        this.floatText(label, delta > 0 ? PALETTE.good : PALETTE.bad, sign.x, sign.y - 36, 1700, 14);
+        if (fx) this.floatText(label, delta > 0 ? PALETTE.good : PALETTE.bad, sign.x, sign.y - 36, 1700, 14);
         break;
       }
       case "error":
@@ -128,7 +135,7 @@ export class Director {
         if (ev.job_id && ev.data.note.startsWith("Stop:")) this.stopped.add(ev.job_id);
         break;
       case "final":
-        this.floatText(
+        if (fx) this.floatText(
           ev.job_id && this.stopped.has(ev.job_id) ? "JOB STOPPED" : ev.data.status === "ok" ? "JOB DONE!" : `JOB ${ev.data.status.toUpperCase()}`,
           PALETTE.gold, WORLD.w / 2, WORLD.h / 2, 2200, 48);
         this.sendEveryoneHome();

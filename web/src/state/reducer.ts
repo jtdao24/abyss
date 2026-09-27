@@ -58,6 +58,12 @@ export interface MarketState {
   history: { jobId: string; jobText: string; final: FinalData }[];
   /** Steering notes the server acknowledged, for every job this session. */
   steering: { jobId: string; target: "job" | AgentId; note: string }[];
+  /**
+   * The highest `seq` applied for each job. A reconnect (or a second tab)
+   * replays the current or last job's events: anything at or below this is
+   * one we already have.
+   */
+  lastSeq: Record<string, number>;
 }
 
 export const initialState: MarketState = {
@@ -74,16 +80,41 @@ export const initialState: MarketState = {
   assembled: null,
   history: [],
   steering: [],
+  lastSeq: {},
 };
-
-
 
 export function setConnected(state: MarketState, connected: boolean): MarketState {
   return { ...state, connected };
 }
 
+/**
+ * True when `ev` is a job event this state has already applied: the server
+ * sends the current (or last) job's events to every connection that joins, so
+ * a reconnect replays what we saw before it dropped. `seq` is server-wide and
+ * strictly increasing, so "at or below the last one seen for that job" is exact.
+ */
+export function isReplay(state: MarketState, ev: AbyssEvent): boolean {
+  if (ev.job_id === null) return false; // hello and one connection's own errors
+  const last = state.lastSeq[ev.job_id];
+  return last !== undefined && ev.seq <= last;
+}
+
+/**
+ * A replayed event changes nothing we already know, except whether the job is
+ * still running: the fresh `hello` cleared that, and the replay (which runs in
+ * order up to the job's end, if it ended) puts it back.
+ */
+function replayed(state: MarketState, ev: AbyssEvent): MarketState {
+  if (ev.job_id !== state.currentJob?.jobId) return state;
+  const ends = ev.type === "final" || (ev.type === "error" && ev.data.fatal);
+  const jobActive = !ends && !state.history.some((h) => h.jobId === ev.job_id);
+  return jobActive === state.jobActive ? state : { ...state, jobActive };
+}
+
 export function reduce(state: MarketState, ev: AbyssEvent): MarketState {
-  const withLog = { ...state, log: [...state.log, ev].slice(-200) };
+  if (isReplay(state, ev)) return replayed(state, ev);
+  const lastSeq = ev.job_id === null ? state.lastSeq : { ...state.lastSeq, [ev.job_id]: ev.seq };
+  const withLog = { ...state, lastSeq, log: [...state.log, ev].slice(-200) };
   switch (ev.type) {
     case "hello": {
       const agents: MarketState["agents"] = {};
@@ -94,8 +125,10 @@ export function reduce(state: MarketState, ev: AbyssEvent): MarketState {
           status: "idle",
         };
       }
-      // A fresh hello means a fresh connection: the server cancels a connection's
-      // job when it drops, so nothing can still be running.
+      // A fresh hello means a fresh connection. Closing a connection never
+      // cancels the server's job, but we can't tell from hello whether one is
+      // running: the server replays the current (or last) job's events right
+      // after it, and those put jobActive back (see `replayed`).
       return { ...withLog, agents, connected: true, config: ev.data.config, jobActive: false };
     }
     case "job_split": {
