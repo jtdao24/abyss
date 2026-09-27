@@ -99,7 +99,7 @@ The market shows vendor names, not models. The table above says which model runs
 - **Right now:** `/stop` ends the running job.
 - **Costs:** the **Costs** button in the header shows what each session cost and what the premium vendor alone would have cost.
 
-The header's **♪** button turns the 8-bit sound effects on or off (remembered per browser).
+The speaker button in the header turns the 8-bit sound effects on or off (remembered per browser).
 
 ## How the market works
 
