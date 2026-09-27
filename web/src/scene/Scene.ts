@@ -74,7 +74,7 @@ export const PALETTE = {
   checking: THEME.checking,
 } as const;
 
-export const SPENT_POS = { x: WORLD.w - 14, y: 16 };
+export const SPENT_POS = { x: WORLD.w - 14, y: 20 };
 /** The task list panel (click it to see every task). */
 export const TASK_PANEL: Rect = [10, 36, 250, 36 + 20 + MAX_CARDS * 18];
 
@@ -493,7 +493,7 @@ export class MarketScene {
     const hud = new Graphics().rect(0, 0, WORLD.w, 32).fill({ color: PALETTE.ink, alpha: 0.75 });
     this.banner = text("", 16);
     this.banner.anchor.set(0, 0.5);
-    this.banner.position.set(12, 16);
+    this.banner.position.set(12, SPENT_POS.y);
     this.spent = text("", 16, PALETTE.gold);
     this.spent.anchor.set(1, 0.5);
     this.spent.position.set(SPENT_POS.x, SPENT_POS.y);

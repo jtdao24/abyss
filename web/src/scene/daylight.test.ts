@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { daylightAt, daylightFor } from "./daylight";
+import { daylightAt, daylightFor, oppositeTimeMode } from "./daylight";
 
 describe("daylightAt", () => {
   it("leaves the art as painted at midday", () => {
@@ -33,5 +33,12 @@ describe("daylightFor", () => {
     expect(daylightFor("night", noon).lamps).toBe(1);
     expect(daylightFor("auto", evening).lamps).toBe(1);
     expect(daylightFor("auto", noon).lamps).toBe(0);
+  });
+
+  it("offers the opposite manual light mode", () => {
+    expect(oppositeTimeMode("night")).toBe("day");
+    expect(oppositeTimeMode("day")).toBe("night");
+    expect(oppositeTimeMode("auto", new Date(2026, 0, 1, 2))).toBe("day");
+    expect(oppositeTimeMode("auto", new Date(2026, 0, 1, 12))).toBe("night");
   });
 });

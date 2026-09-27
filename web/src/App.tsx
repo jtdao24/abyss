@@ -5,7 +5,7 @@ import { api, type Prices, type Provider, type SessionSummary, type Usage } from
 import type { ClientMsg } from "./contract";
 
 import { Director } from "./scene/director";
-import { TIME_MODES, readTimeMode, saveTimeMode, type TimeMode } from "./scene/daylight";
+import { oppositeTimeMode, readTimeMode, saveTimeMode, type TimeMode } from "./scene/daylight";
 import { MarketScene } from "./scene/Scene";
 import type { InteractId } from "./scene/world";
 import { FixtureSource } from "./sources/fixture";
@@ -84,10 +84,9 @@ function SoundIcon({ muted }: { muted: boolean }) {
   );
 }
 
-const TIME_LABEL: Record<TimeMode, string> = {
-  auto: "Light follows your clock",
-  day: "Always day",
-  night: "Always night",
+const TIME_ACTION_LABEL: Record<Exclude<TimeMode, "auto">, string> = {
+  day: "Switch to day",
+  night: "Switch to night",
 };
 
 function TimeIcon({ mode }: { mode: TimeMode }) {
@@ -128,8 +127,9 @@ export default function App() {
   const [usage, setUsage] = useState<Usage | null>(null);
   const [muted, setMutedState] = useState(isMuted());
   const [timeMode, setTimeMode] = useState<TimeMode>(readTimeMode);
-  const cycleTime = () => {
-    const next = TIME_MODES[(TIME_MODES.indexOf(timeMode) + 1) % TIME_MODES.length];
+  const timeTarget = oppositeTimeMode(timeMode);
+  const toggleTime = () => {
+    const next = timeTarget;
     setTimeMode(next);
     saveTimeMode(next);
     sceneRef.current?.setTimeMode(next);
@@ -329,11 +329,11 @@ export default function App() {
             <button
               type="button"
               className="ledger-toggle sound-toggle"
-              aria-label={`${TIME_LABEL[timeMode]} (click to change)`}
-              title={TIME_LABEL[timeMode]}
-              onClick={cycleTime}
+              aria-label={TIME_ACTION_LABEL[timeTarget]}
+              title={TIME_ACTION_LABEL[timeTarget]}
+              onClick={toggleTime}
             >
-              <TimeIcon mode={timeMode} />
+              <TimeIcon mode={timeTarget} />
             </button>
           </div>
         </header>

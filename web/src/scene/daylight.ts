@@ -57,6 +57,11 @@ export function daylightFor(mode: TimeMode, now = new Date()): Daylight {
   return daylightAt(now.getHours() + now.getMinutes() / 60);
 }
 
+/** The manual mode a day/night action should offer for the current light. */
+export function oppositeTimeMode(mode: TimeMode, now = new Date()): Exclude<TimeMode, "auto"> {
+  return daylightFor(mode, now).lamps > 0 ? "day" : "night";
+}
+
 export function readTimeMode(): TimeMode {
   try {
     const saved = window.localStorage.getItem(MODE_KEY);
