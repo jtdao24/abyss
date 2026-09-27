@@ -88,11 +88,21 @@ export default function App() {
   const [showLedger, setShowLedger] = useState(rawLedger || (SOURCE === "ws" && window.innerWidth >= 1280));
   const [showTools, setShowTools] = useState(false);
   const [sceneReady, setSceneReady] = useState(false);
+  const [sceneError, setSceneError] = useState<string | null>(null);
+  // A refusal meant for you ("a job is already running", a spending limit)
+  // shows here when the Captain's terminal isn't open to say it.
+  const [notice, setNotice] = useState<string | null>(null);
   const [providers, setProviders] = useState<Provider[]>([]);
   const [prices, setPrices] = useState<Prices | null>(null);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [usage, setUsage] = useState<Usage | null>(null);
   const [muted, setMutedState] = useState(isMuted());
+
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(null), 6000);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
 
   useEffect(() => {
     installAudioUnlock();
@@ -131,6 +141,10 @@ export default function App() {
       scene.render(store.getState());
       unsubscribe = store.subscribe(() => scene?.render(store.getState()));
       setSceneReady(true);
+    }).catch((error: unknown) => {
+      if (cancelled) return;
+      console.error("The market scene failed to load", error);
+      setSceneError(error instanceof Error ? error.message : String(error));
     });
     return () => {
       cancelled = true;
@@ -154,6 +168,9 @@ export default function App() {
       store.dispatch(event);
       if (event.type === "hello" && SOURCE === "ws") catchUpUntil = performance.now() + CATCH_UP_MS;
       if (replay) return;
+      if (event.type === "error" && event.job_id === null && !event.data.fatal && dialogRef.current !== "main") {
+        setNotice(event.data.message);
+      }
       const quiet = event.type !== "hello" && performance.now() < catchUpUntil;
       directorRef.current?.onEvent(event, quiet);
       if (!quiet) onMarketEvent(event);
@@ -281,9 +298,25 @@ export default function App() {
               ))}
             </nav>
             {!sceneReady && (
-              <div className="stage-placeholder">
+              <div className="stage-placeholder" role={sceneError ? "alert" : undefined}>
                 <span>ABYSS MARKET</span>
-                <small>SETTING UP THE BOARDWALK</small>
+                {sceneError ? (
+                  <>
+                    <small>THE BOARDWALK DIDN'T LOAD</small>
+                    <p className="stage-error">{sceneError}</p>
+                    <button type="button" className="ledger-toggle" onClick={() => window.location.reload()}>
+                      Try again
+                    </button>
+                  </>
+                ) : (
+                  <small>SETTING UP THE BOARDWALK</small>
+                )}
+              </div>
+            )}
+            {notice && (
+              <div className="market-notice" role="status">
+                <span>{notice}</span>
+                <button type="button" aria-label="Dismiss" onClick={() => setNotice(null)}>×</button>
               </div>
             )}
             {dialog && (

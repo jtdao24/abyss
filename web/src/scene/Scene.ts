@@ -255,7 +255,10 @@ export class MarketScene {
     this.stopWatchdog();
     this.resizeObserver?.disconnect();
     this.app.ticker.remove(this.tick);
-    this.app.destroy(true, { children: true });
+    // The ripples own canvas textures and filters Pixi doesn't know to free:
+    // unbind them first, or Pixi warns about textures destroyed while bound.
+    this.ambient?.destroy();
+    this.app.destroy(true, { children: true, texture: true, textureSource: true });
   }
 
   /** Walk the player somewhere; `then` runs on arrival (a new click cancels it). */
@@ -316,6 +319,14 @@ export class MarketScene {
     this.base = fitted;
     this.camTarget = this.cameraFor(this.focused);
     if (this.focused === null) this.cam = { ...this.base };
+    // A resize clears the canvas. Draw now, inside the ResizeObserver callback
+    // (before the browser paints), or the page shows one blank frame.
+    this.stepCamera(0);
+    try {
+      this.app.render();
+    } catch {
+      /* the guarded frame loop reports render errors; the next tick retries */
+    }
   }
 
   private cameraFor(id: InteractId | null): { scale: number; x: number; y: number } {
@@ -439,7 +450,10 @@ export class MarketScene {
     }
     const thing = hitTest(p, this.vendorPositions());
     const dest = standable(thing ? thing.approach : p);
-    this.walkTo(dest, thing ? () => this.onInteract(thing.id) : null);
+    // The panel opens right away; the player still walks over. (Waiting for
+    // the walk took seconds from across the pier, with no sign anything happened.)
+    this.walkTo(dest);
+    if (thing) this.onInteract(thing.id);
     if (!thing) {
       sfx.click();
       this.onGround();

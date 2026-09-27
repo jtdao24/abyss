@@ -104,6 +104,18 @@ export class Ambient {
     }
   }
 
+  /** Free the ripple layers: unbind the filters, then their textures (Pixi can't tell these are ours). */
+  destroy(): void {
+    const textures = new Set<Texture>();
+    for (const art of this.rippled) {
+      for (const filter of art.filters ?? []) filter.destroy();
+      art.filters = null;
+      textures.add(art.texture);
+    }
+    textures.add(this.waterMap.texture); // the shared noise map
+    for (const texture of textures) texture.destroy(true);
+  }
+
   /** Drop the ripple filters (the art stays, just still): the fallback if they fail to render. */
   disableEffects(): void {
     for (const art of this.rippled) art.filters = null;

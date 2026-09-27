@@ -131,8 +131,10 @@ export function sceneModel(state: MarketState): SceneModel {
     };
   });
 
+  // The lifeguard shows the latest grade while the job runs; once it's over
+  // the final banner has the job's grade, so the bubble goes.
   let review: SceneModel["review"] = null;
-  for (let i = state.taskOrder.length - 1; i >= 0; i -= 1) {
+  for (let i = state.final ? -1 : state.taskOrder.length - 1; i >= 0; i -= 1) {
     const graded = state.tasks[state.taskOrder[i]];
     if (graded?.grade == null) continue;
     const promised = graded.winner ? graded.bids[graded.winner]?.promised_quality ?? null : null;

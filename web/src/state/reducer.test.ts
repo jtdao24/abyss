@@ -71,6 +71,20 @@ describe("market reducer", () => {
     });
   });
 
+  it("leaves the market alone for an error meant for one connection", () => {
+    const events = fixture as AbyssEvent[];
+    const cut = events.findIndex((e) => e.type === "working");
+    const midJob = events.slice(0, cut + 1).reduce(reduce, initialState);
+    const refusal = {
+      v: 1, seq: 500, t: 0, job_id: null, type: "error",
+      data: { message: "a job is already running", task_id: null, fatal: false },
+    } as AbyssEvent;
+    const after = reduce(midJob, refusal);
+    expect(after.jobActive).toBe(true);
+    expect(after.agents).toBe(midJob.agents);
+    expect(after.log.at(-1)).toBe(refusal); // still printed in the terminal
+  });
+
   it("keeps steering notes with the job they belong to", () => {
     const steered = {
       v: 1, seq: 99, t: 5, job_id: "j_7f3a91c2", type: "steered",

@@ -123,6 +123,7 @@ export class Director {
         break;
       }
       case "error":
+        if (ev.job_id === null && !ev.data.fatal) break; // one connection's refusal, not the market's
         if (ev.data.task_id) {
           for (const agentId of AGENT_ORDER) {
             this.carrying[agentId].visible = false;

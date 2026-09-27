@@ -1170,3 +1170,14 @@ b.top, i.top { background: var(--abyss-muted); }
     transition-duration: 0.01ms !important; scroll-behavior: auto !important;
   }
 }
+
+/* ---- scene failure and one-off notices ---- */
+.stage-error { max-width: 46ch; margin: 4px 16px 8px; color: #ffd9c9; font: 13px/1.5 var(--font-ui); text-align: center; overflow-wrap: anywhere; }
+.market-notice {
+  position: absolute; top: 12px; left: 50%; z-index: 25; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 10px; max-width: min(560px, calc(100% - 24px));
+  padding: 8px 10px 8px 14px; color: var(--abyss-text); background: rgba(8, 18, 26, 0.94);
+  border: 2px solid var(--abyss-gold); border-radius: 8px; font: 13px/1.4 var(--font-ui);
+}
+.market-notice button { padding: 0 6px; color: var(--abyss-text-dim); background: none; border: 0; cursor: pointer; font-size: 18px; }
+.market-notice button:focus-visible { outline: 2px solid var(--abyss-teal); }

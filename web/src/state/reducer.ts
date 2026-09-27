@@ -240,6 +240,9 @@ export function reduce(state: MarketState, ev: AbyssEvent): MarketState {
         ],
       };
     case "error":
+      // An error for this connection only ("a job is already running", a bad
+      // command, a spending limit): it says nothing about the market's job.
+      if (ev.job_id === null && !ev.data.fatal) return withLog;
       return {
         ...withLog,
         agents: mapAgentStatus(state.agents, () => "idle"),
