@@ -24,15 +24,22 @@ interface GameDialogProps {
   sessions?: SessionSummary[];
 }
 
-function Shell({ title, subtitle, onClose, children, side = true }: { title: string; subtitle?: string; onClose(): void; children: ReactNode; side?: boolean }) {
+function Shell({ title, subtitle, portrait, onClose, children, side = true }: { title: string; subtitle?: string; portrait?: string; onClose(): void; children: ReactNode; side?: boolean }) {
   const ref = useRef<HTMLDivElement | null>(null);
   useDialogFocus(ref);
   return (
     <div ref={ref} className={`rpg-dialog ${side ? "side" : ""}`} role="dialog" aria-label={title} onPointerDown={(e) => e.stopPropagation()}>
       <header>
-        <div>
-          <strong>{title}</strong>
-          {subtitle && <small>{subtitle}</small>}
+        <div className="dialog-heading">
+          {portrait && (
+            <span className="vp-portrait reviewer-portrait" style={{ ["--vendor" as string]: "#c94f45" }} aria-hidden="true">
+              <i style={{ backgroundImage: `url(${portrait})` }} />
+            </span>
+          )}
+          <div>
+            <strong>{title}</strong>
+            {subtitle && <small>{subtitle}</small>}
+          </div>
         </div>
         <button type="button" onClick={onClose} aria-label="Close">×</button>
       </header>
@@ -76,7 +83,7 @@ function TasksDialog({ state, onClose }: GameDialogProps) {
 function ReviewerDialog({ state, onClose }: GameDialogProps) {
   const graded = state.taskOrder.map((id) => state.tasks[id]).filter((t) => t.grade !== null);
   return (
-    <Shell title="Lifeguard" subtitle="I keep watch and grade blind: I never know which vendor did the work." onClose={onClose}>
+    <Shell title="Lifeguard" subtitle="I keep watch and grade blind: I never know which vendor did the work." portrait="/art/characters/reviewer.png" onClose={onClose}>
       {graded.length === 0 && <p>Nothing to review yet.</p>}
       <ul className="board-list">
         {graded.map((task) => {

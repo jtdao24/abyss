@@ -69,7 +69,7 @@ function vendorAt(agentId: AgentId, label: string, at: Point): Interactable {
 /** What the camera frames when the player talks to someone. */
 export function focusRect(id: InteractId): Rect | null {
   if (id === "main") return [360, 560, 880, 860];
-  if (id === "reviewer") return [60, 460, 400, 720];
+  if (id === "reviewer") return [REVIEWER_POS.x - 200, REVIEWER_POS.y - 227, REVIEWER_POS.x + 200, REVIEWER_POS.y + 68];
   if (id.startsWith("vendor:")) {
     const { cx } = STALLS[id.slice("vendor:".length) as AgentId];
     return [cx - 200, 225, cx + 200, 520];

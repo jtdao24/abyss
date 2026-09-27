@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { INTERACTABLES, STALLS, type Point, clearLine, hitTest, route, standable, walkable } from "./world";
+import { INTERACTABLES, REVIEWER_POS, STALLS, type Point, clearLine, focusRect, hitTest, route, standable, walkable } from "./world";
 
 describe("boardwalk world", () => {
   it("keeps clicks on the planks, never in the water", () => {
@@ -48,6 +48,13 @@ describe("boardwalk world", () => {
   it("can't stand on a stall's flower barrels", () => {
     expect(walkable({ x: 300, y: 400 })).toBe(false); // Vendor 1's left barrel
     expect(walkable({ x: 960, y: 400 })).toBe(false); // Vendor 2's right barrel
+  });
+
+  it("centres the lifeguard in his focus frame", () => {
+    const [x0, y0, x1, y1] = focusRect("reviewer")!;
+    const [vendorX0, vendorY0, vendorX1, vendorY1] = focusRect("vendor:opus")!;
+    expect((x0 + x1) / 2).toBe(REVIEWER_POS.x);
+    expect([x1 - x0, y1 - y0]).toEqual([vendorX1 - vendorX0, vendorY1 - vendorY0]);
   });
 
   it("clicks a vendor only on the vendor, and follows them when they move", () => {

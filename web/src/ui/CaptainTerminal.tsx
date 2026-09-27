@@ -432,7 +432,6 @@ export function CaptainTerminal({ state, onClose, send, providers = [], sessions
   return (
     <div ref={dialog} className="rpg-dialog captain-term" role="dialog" aria-label="Captain terminal" onPointerDown={(e) => e.stopPropagation()}>
       <div className="ct-bar">
-        <span className="ct-dots"><i /><i /><i /></span>
         <strong>captain@abyss</strong>
         <em className={running ? "busy" : ""}>{running ? "job running" : live ? (state.connected ? "ready" : "connecting…") : "replay"}</em>
         {running && live && (
