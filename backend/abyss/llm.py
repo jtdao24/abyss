@@ -40,6 +40,38 @@ class LLMError(Exception):
     tools_ran: bool = False
 
 
+class BudgetExceeded(LLMError):
+    """The job's budget can't pay for this call, so it was never made (costs nothing)."""
+
+
+# Below this many output tokens a call can't produce anything useful.
+MIN_BUDGET_TOKENS = 200
+
+
+def budget_token_cap(ledger: Ledger, model: str, system: str, user: str) -> int | None:
+    """The most output tokens this call may use and stay within the job's budget
+    (None when there is no budget). Raises BudgetExceeded when nothing's left."""
+    remaining = getattr(ledger, "remaining_usd", lambda: None)()
+    if remaining is None:
+        return None
+    input_price, output_price = config.PRICES.get(model, config.FALLBACK_PRICE)
+    input_cost = (len(system) + len(user)) / 4 * input_price / 1_000_000
+    allowed = int((remaining - input_cost) * 1_000_000 / output_price) if output_price else 10**9
+    if remaining <= 0 or allowed < MIN_BUDGET_TOKENS:
+        raise BudgetExceeded(
+            f"budget reached: ${ledger.total_cost():.4f} of ${ledger.budget_usd:.4f} spent"
+        )
+    return allowed
+
+
+def _apply_cap(request: dict, cap: int | None) -> None:
+    if cap is None:
+        return
+    for key in ("max_completion_tokens", "max_tokens"):
+        if key in request:
+            request[key] = min(request[key], cap)
+
+
 class LLM:
     def __init__(
         self, client: Any | None = None, provider: str | None = None, tools: ToolHub | None = None
@@ -163,6 +195,12 @@ class LLM:
         for round_no in range(config.MAX_TOOL_ROUNDS + 1):
             if round_no == config.MAX_TOOL_ROUNDS:
                 request["tool_choice"] = "none"
+            try:
+                cap = budget_token_cap(ledger, model, system, json.dumps(messages, default=str))
+            except BudgetExceeded as exc:
+                exc.tools_ran = tools_ran
+                raise
+            _apply_cap(request, cap)
             started = time.monotonic()
             try:
                 response = await asyncio.wait_for(
@@ -245,6 +283,7 @@ class LLM:
             provider_name=provider_name, model=model, system=system, user=user,
             max_tokens=max_tokens, effort=effort, schema=schema,
         )
+        _apply_cap(request, budget_token_cap(ledger, model, system, user))
         try:
             response = await asyncio.wait_for(
                 self._client.chat.completions.create(**request), timeout=NETWORK_TIMEOUT_SECONDS
@@ -313,6 +352,9 @@ class LLM:
         # Name and price fake calls as the provider's model for this tier, so
         # fake mode's ledger and costs look like a real OpenAI / Muse run.
         model = config.tier_model(nominal_model, self.provider_name)
+        cap = budget_token_cap(ledger, model, system, user)
+        if cap is not None:
+            output_tokens = min(output_tokens, cap)
         price = cost_usd(model, input_tokens, output_tokens)
         duration_ms = _duration_ms(started)
         usage_values = {
