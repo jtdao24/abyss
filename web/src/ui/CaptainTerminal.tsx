@@ -1,12 +1,14 @@
 // The Captain is a terminal: type a job (or a /command) at the prompt and the
 // market streams its progress back, line by line, like `python -m abyss.chat`.
-import { useEffect, useReducer, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useReducer, useRef, useState, type ReactNode } from "react";
 
 import { sfx } from "../audio/sfx";
 import { api, type Attachment, type McpServer, type Provider, type SessionRecord, type SessionSummary } from "../api";
 import type { AbyssEvent, AgentId, ClientMsg } from "../contract";
+import { formatUsd } from "../state/costs";
 import type { MarketState } from "../state/reducer";
 import { downloadText, openResult, resultDoc, stoppedJobs } from "./resultView";
+import { eventKey, nearBottom } from "./terminalScroll";
 
 type Tone = "plain" | "dim" | "bold" | "cyan" | "green" | "yellow" | "red" | "echo";
 type Line = { text: string; tone: Tone; action?: { label: string; run: () => void } };
@@ -87,7 +89,7 @@ function describe(ev: AbyssEvent, ctx: Context): Line[] {
     case "working":
       return [{ text: `   ${VENDOR[ev.data.agent_id]} is working on it...`, tone: "dim" }];
     case "done":
-      return [{ text: `   ${VENDOR[ev.data.agent_id]} finished (${ev.data.usage.output_tokens} tokens, $${ev.data.usage.cost_usd.toFixed(4)}) → off to the reviewer`, tone: "dim" }];
+      return [{ text: `   ${VENDOR[ev.data.agent_id]} finished (${ev.data.usage.output_tokens} tokens, ${formatUsd(ev.data.usage.cost_usd)}) → off to the reviewer`, tone: "dim" }];
     case "graded": {
       const { grade, promised_quality: promised } = ev.data;
       const tone: Tone = promised === null || grade >= promised ? "green" : grade < promised - 1 ? "red" : "yellow";
@@ -117,7 +119,7 @@ function describe(ev: AbyssEvent, ctx: Context): Line[] {
           ? { text: `■ Stopped. Your file has what was finished: ${f.filename}`, tone: "yellow", action: { label: "Open file", run: open } }
           : { text: `✅ Done! Your file is ready: ${f.filename}`, tone: "green", action: { label: "Open file", run: open } },
         ...(f.summary ? [{ text: `   ${f.summary}`, tone: "plain" as Tone }] : []),
-        { text: `   mean grade ${f.mean_grade ?? "—"}/10 · total cost $${f.total_cost_usd.toFixed(4)} · ${(f.duration_ms / 1000).toFixed(1)}s`, tone: "dim" },
+        { text: `   mean grade ${f.mean_grade ?? "—"}/10 · total cost ${formatUsd(f.total_cost_usd)} · ${(f.duration_ms / 1000).toFixed(1)}s`, tone: "dim" },
         ...(weakTasks(f.tasks).length
           ? [{ text: `   /retry sends ${weakTasks(f.tasks).map((id) => id.toUpperCase()).join(", ")} out for bids again and keeps the rest`, tone: "yellow" as Tone }]
           : []),
@@ -144,6 +146,7 @@ function describe(ev: AbyssEvent, ctx: Context): Line[] {
 // The terminal outlives its window: closing the Captain and coming back keeps
 // the scrollback, your settings and your command history.
 type Local = { id: number; after: AbyssEvent | null; lines: Line[] };
+const MAX_LOCAL = 300;
 const term = {
   nextId: 1,
   local: [] as Local[],
@@ -177,10 +180,27 @@ export function CaptainTerminal({ state, onClose, send, providers = [], sessions
   const live = Boolean(send);
   const running = state.jobActive;
 
-  const print = (...lines: (Line | string)[]) => {
+  const toLines = (lines: (Line | string)[]): Line[] => lines.map((l) => (typeof l === "string" ? { text: l, tone: "plain" } : l));
+  const print = (...lines: (Line | string)[]): Local => {
     const last = state.log.at(-1) ?? null;
-    term.local.push({ id: term.nextId++, after: last, lines: lines.map((l) => (typeof l === "string" ? { text: l, tone: "plain" } : l)) });
+    const entry: Local = { id: term.nextId++, after: last, lines: toLines(lines) };
+    term.local.push(entry);
+    // The market's own log keeps its last 200 events; keep your lines bounded too.
+    if (term.local.length > MAX_LOCAL) term.local.splice(0, term.local.length - MAX_LOCAL);
     rerender();
+    return entry;
+  };
+  /**
+   * For commands that answer later (a fetch): print a placeholder now and fill
+   * it in place when the answer comes, so the reply sits under its command
+   * instead of after whatever you typed next.
+   */
+  const later = (what: string) => {
+    const entry = print({ text: `${what}…`, tone: "dim" });
+    return (...lines: (Line | string)[]) => {
+      entry.lines = toLines(lines);
+      rerender();
+    };
   };
 
   // A welcome the first time the terminal opens.
@@ -195,24 +215,23 @@ export function CaptainTerminal({ state, onClose, send, providers = [], sessions
     if (live) api.mcp().then((v) => (term.toolServers = v.servers.filter((s) => s.state === "ready"))).catch(() => undefined);
   }, []);
 
-  // Stay pinned to the newest line while the market talks (unless you scrolled up).
-  const lineCount = state.log.length + term.local.length;
-  useEffect(() => {
+  // Stay pinned to the newest line while the market talks, unless you scrolled up.
+  // "Were you at the bottom" is measured when you scroll, not after lines arrive:
+  // a burst taller than the slack (the job's plan) would otherwise unpin it.
+  const pinned = useRef(true);
+  useLayoutEffect(() => {
     const el = screen.current;
-    if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 80) el.scrollTop = el.scrollHeight;
-  }, [lineCount]);
-  useEffect(() => {
-    if (screen.current) screen.current.scrollTop = screen.current.scrollHeight;
-  }, []);
+    if (el && pinned.current) el.scrollTop = el.scrollHeight;
+  });
 
   const attach = async (make: () => Promise<Attachment>, what: string) => {
-    print({ text: `reading ${what}…`, tone: "dim" });
+    const answer = later(`reading ${what}`);
     try {
       const added = await make();
       term.attachments = [...term.attachments.filter((a) => a.id !== added.id), added].slice(0, 5);
-      print({ text: `attached ${added.name} (${added.chars.toLocaleString()} chars) to your next job`, tone: "green" });
+      answer({ text: `attached ${added.name} (${added.chars.toLocaleString()} chars) to your next job`, tone: "green" });
     } catch (error) {
-      print({ text: `couldn't attach that: ${error instanceof Error ? error.message : "unknown error"}`, tone: "red" });
+      answer({ text: `couldn't attach that: ${error instanceof Error ? error.message : "unknown error"}`, tone: "red" });
     }
   };
 
@@ -223,7 +242,7 @@ export function CaptainTerminal({ state, onClose, send, providers = [], sessions
     if (!send!({ type: "stop_job" })) print({ text: "couldn't send that: the connection dropped", tone: "red" });
   };
 
-  const rerun = (record: SessionRecord) => {
+  const rerun = (record: SessionRecord): Line[] => {
     const sent = send!({
       type: "start_job",
       job: record.job_text,
@@ -233,8 +252,8 @@ export function CaptainTerminal({ state, onClose, send, providers = [], sessions
       ...(record.tools ? { tools: record.tools } : {}),
       ...(running ? { queue: true } : {}),
     });
-    if (!sent) return print({ text: "couldn't send that: the connection dropped", tone: "red" });
-    print({ text: `${running ? "queued" : "running"} again: "${record.job_text.slice(0, 70)}" (same AI, budget, tools and files)`, tone: "dim" });
+    if (!sent) return [{ text: "couldn't send that: the connection dropped", tone: "red" }];
+    return [{ text: `${running ? "queued" : "running"} again: "${record.job_text.slice(0, 70)}" (same AI, budget, tools and files)`, tone: "dim" }];
   };
 
   const needLive = () => {
@@ -331,23 +350,24 @@ export function CaptainTerminal({ state, onClose, send, providers = [], sessions
         if (needLive()) return;
         const [action, ...nameParts] = rest.split(" ");
         const name = nameParts.join(" ").trim().toLowerCase();
+        const answer = later("checking the tool servers");
         api.mcp().then(
           (v) => {
             term.toolServers = v.servers.filter((t) => t.state === "ready");
             const find = () => term.toolServers.find((t) => t.name.toLowerCase() === name || t.label.toLowerCase() === name);
             if (action === "all") {
               term.toolsOff = [];
-              return print({ text: "every tool server is on for your next job", tone: "dim" });
+              return answer({ text: "every tool server is on for your next job", tone: "dim" });
             }
             if (action === "on" || action === "off") {
               const server = find();
-              if (!server) return print({ text: `no connected tool server called "${name}" (try /tools)`, tone: "red" });
+              if (!server) return answer({ text: `no connected tool server called "${name}" (try /tools)`, tone: "red" });
               term.toolsOff = action === "off" ? [...new Set([...term.toolsOff, server.name])] : term.toolsOff.filter((n) => n !== server.name);
-              return print({ text: `${server.label} is ${action} for your next job`, tone: "dim" });
+              return answer({ text: `${server.label} is ${action} for your next job`, tone: "dim" });
             }
-            if (action) return print({ text: "usage: /tools, /tools on <name>, /tools off <name>, /tools all", tone: "red" });
-            if (!term.toolServers.length) return print({ text: "no tool servers connected (add some with the Tools button)", tone: "dim" });
-            print(
+            if (action) return answer({ text: "usage: /tools, /tools on <name>, /tools off <name>, /tools all", tone: "red" });
+            if (!term.toolServers.length) return answer({ text: "no tool servers connected (add some with the Tools button)", tone: "dim" });
+            answer(
               ...term.toolServers.map((t) => ({
                 text: `  ${term.toolsOff.includes(t.name) ? "·" : "✓"} ${t.name} — ${t.label} (${t.tools.length} tools)${term.toolsOff.includes(t.name) ? ", off" : ""}`,
                 tone: (term.toolsOff.includes(t.name) ? "dim" : "plain") as Tone,
@@ -355,7 +375,7 @@ export function CaptainTerminal({ state, onClose, send, providers = [], sessions
               { text: "/tools off <name> leaves one out of your next job", tone: "dim" },
             );
           },
-          () => print({ text: "couldn't reach the tool servers", tone: "red" }),
+          () => answer({ text: "couldn't reach the tool servers", tone: "red" }),
         );
         return;
       }
@@ -367,13 +387,15 @@ export function CaptainTerminal({ state, onClose, send, providers = [], sessions
         setInput(pick);
         return rerender();
       }
-      case "estimate":
+      case "estimate": {
         if (needLive()) return;
+        const answer = later("estimating");
         api.estimate(term.provider).then(
-          (e) => print({ text: `a typical ${e.tasks}-task job costs about $${e.low_usd.toFixed(4)}–$${e.high_usd.toFixed(4)} (${e.calls} AI calls)`, tone: "dim" }),
-          () => print({ text: "couldn't get an estimate", tone: "red" }),
+          (e) => answer({ text: `a typical ${e.tasks}-task job costs about ${formatUsd(e.low_usd)}–${formatUsd(e.high_usd)} (${e.calls} AI calls)`, tone: "dim" }),
+          () => answer({ text: "couldn't get an estimate", tone: "red" }),
         );
         return;
+      }
       case "steer": {
         if (needLive()) return;
         const [who, ...noteParts] = rest.split(" ");
@@ -386,27 +408,33 @@ export function CaptainTerminal({ state, onClose, send, providers = [], sessions
       }
       case "stop":
         return stop();
-      case "queue":
+      case "queue": {
         if (needLive()) return;
+        const answer = later("reading the queue");
         api.queue().then(
           (q) => {
-            if (!q.queue.length) return print({ text: "nothing queued", tone: "dim" });
-            print(...q.queue.map((item, i) => `  ${i + 1}. ${item.job.slice(0, 70)}`), { text: "/unqueue <n> removes one", tone: "dim" });
+            if (!q.queue.length) return answer({ text: "nothing queued", tone: "dim" });
+            answer(...q.queue.map((item, i) => `  ${i + 1}. ${item.job.slice(0, 70)}`), { text: "/unqueue <n> removes one", tone: "dim" });
           },
-          () => print({ text: "couldn't read the queue", tone: "red" }),
+          () => answer({ text: "couldn't read the queue", tone: "red" }),
         );
         return;
+      }
       case "unqueue": {
         if (needLive()) return;
         const n = Number(rest);
-        api.queue().then((q) => {
-          const item = q.queue[n - 1];
-          if (!item) return print({ text: "usage: /unqueue <n> (see /queue)", tone: "red" });
-          api.dequeue(item.id).then(
-            () => print({ text: `removed "${item.job.slice(0, 60)}" from the queue`, tone: "dim" }),
-            () => print({ text: "couldn't remove it", tone: "red" }),
-          );
-        });
+        const answer = later("reading the queue");
+        api.queue().then(
+          (q) => {
+            const item = q.queue[n - 1];
+            if (!item) return answer({ text: "usage: /unqueue <n> (see /queue)", tone: "red" });
+            api.dequeue(item.id).then(
+              () => answer({ text: `removed "${item.job.slice(0, 60)}" from the queue`, tone: "dim" }),
+              () => answer({ text: "couldn't remove it", tone: "red" }),
+            );
+          },
+          () => answer({ text: "couldn't read the queue", tone: "red" }),
+        );
         return;
       }
       case "retry": {
@@ -419,20 +447,21 @@ export function CaptainTerminal({ state, onClose, send, providers = [], sessions
         const number = parts.find((p) => /^\d+$/.test(p));
         const s = sessions[(number ? Number(number) : 1) - 1];
         if (!s) return print({ text: "usage: /retry [t2,t3] [n] (see /sessions; no number = the latest)", tone: "red" });
+        const answer = later("loading that session");
         api.session(s.id).then(
           (record) => {
-            if (!record.plan?.length) return print({ text: "that session was saved before retries existed: /rerun runs the whole job again", tone: "yellow" });
+            if (!record.plan?.length) return answer({ text: "that session was saved before retries existed: /rerun runs the whole job again", tone: "yellow" });
             const ids = named.length ? named : weakTasks(record.final?.tasks ?? []);
-            if (!ids.length) return print({ text: "every task met its promise: name one to redo anyway, like /retry t2", tone: "dim" });
+            if (!ids.length) return answer({ text: "every task met its promise: name one to redo anyway, like /retry t2", tone: "dim" });
             const sent = send!({ type: "retry_task", session_id: s.id, task_ids: ids, ...(running ? { queue: true } : {}) });
-            if (!sent) return print({ text: "couldn't send that: the connection dropped", tone: "red" });
+            if (!sent) return answer({ text: "couldn't send that: the connection dropped", tone: "red" });
             const titles = ids.map((id) => {
               const task = record.plan!.find((p) => p.task_id === id);
               return task ? `${id.toUpperCase()} (${task.title})` : id.toUpperCase();
             });
-            print({ text: `${running ? "queued: " : ""}redoing ${titles.join(", ")}; the other tasks keep their work, free`, tone: "dim" });
+            answer({ text: `${running ? "queued: " : ""}redoing ${titles.join(", ")}; the other tasks keep their work, free`, tone: "dim" });
           },
-          () => print({ text: "couldn't load that session", tone: "red" }),
+          () => answer({ text: "couldn't load that session", tone: "red" }),
         );
         return;
       }
@@ -440,7 +469,11 @@ export function CaptainTerminal({ state, onClose, send, providers = [], sessions
         if (needLive()) return;
         const s = sessions[(rest ? Number(rest) : 1) - 1];
         if (!s) return print({ text: "usage: /rerun [n] (see /sessions; no number = the latest)", tone: "red" });
-        api.session(s.id).then(rerun, () => print({ text: "couldn't load that session", tone: "red" }));
+        const answer = later("loading that session");
+        api.session(s.id).then(
+          (record) => answer(...rerun(record)),
+          () => answer({ text: "couldn't load that session", tone: "red" }),
+        );
         return;
       }
       case "reset":
@@ -468,14 +501,15 @@ export function CaptainTerminal({ state, onClose, send, providers = [], sessions
       case "open": {
         const s = sessions[Number(rest) - 1];
         if (!s) return print({ text: "usage: /open <n> (see /sessions)", tone: "red" });
+        const answer = later("loading that session");
         api.session(s.id).then(
           (record) => {
             const f = record.final;
-            if (!f?.deliverable) return print({ text: `this session ended without a file (${record.status})`, tone: "dim" });
+            if (!f?.deliverable) return answer({ text: `this session ended without a file (${record.status})`, tone: "dim" });
             openResult(resultDoc(f, record.job_text, Boolean(record.stopped) || record.status === "stopped"));
-            print({ text: `opened ${f.filename ?? "result.md"} from "${record.job_text.slice(0, 60)}"`, tone: "dim" });
+            answer({ text: `opened ${f.filename ?? "result.md"} from "${record.job_text.slice(0, 60)}"`, tone: "dim" });
           },
-          () => print({ text: "couldn't load that session", tone: "red" }),
+          () => answer({ text: "couldn't load that session", tone: "red" }),
         );
         return;
       }
@@ -514,7 +548,7 @@ export function CaptainTerminal({ state, onClose, send, providers = [], sessions
   localByEvent.get(null)?.forEach((l) => pushLines(`l${l.id}`, l.lines));
   const clearedAt = term.clearedAfterEvent ? state.log.indexOf(term.clearedAfterEvent) : -1;
   state.log.forEach((ev, index) => {
-    if (index > clearedAt) pushLines(`e${ev.seq}-${index}`, describe(ev, ctx));
+    if (index > clearedAt) pushLines(`e${eventKey(ev)}`, describe(ev, ctx));
     localByEvent.get(ev)?.forEach((l) => pushLines(`l${l.id}`, l.lines));
   });
 
@@ -531,7 +565,13 @@ export function CaptainTerminal({ state, onClose, send, providers = [], sessions
         )}
         <button type="button" onClick={onClose} aria-label="Close">×</button>
       </div>
-      <div className="ct-screen" ref={screen} onClick={() => window.getSelection()?.isCollapsed && field.current?.focus()} aria-live="polite">
+      <div
+        className="ct-screen"
+        ref={screen}
+        onScroll={(e) => (pinned.current = nearBottom(e.currentTarget))}
+        onClick={() => window.getSelection()?.isCollapsed && field.current?.focus()}
+        aria-live="polite"
+      >
         {rows}
       </div>
       <form
@@ -539,6 +579,7 @@ export function CaptainTerminal({ state, onClose, send, providers = [], sessions
         onSubmit={(e) => {
           e.preventDefault();
           if (input.trim()) (/^\/stop\b/.test(input.trim()) ? sfx.stop : sfx.submit)();
+          pinned.current = true; // typing something takes you back to the newest line
           run(input);
           setInput("");
           setHistoryAt(null);
