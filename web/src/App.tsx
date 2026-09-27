@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { installAudioUnlock, isMuted, onMarketEvent, onMutedChange, setMuted, sfx } from "./audio/sfx";
 import { api, type Prices, type Provider, type SessionSummary, type Usage } from "./api";
 import type { ClientMsg } from "./contract";
 
@@ -65,9 +66,18 @@ export default function App() {
   const [prices, setPrices] = useState<Prices | null>(null);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [usage, setUsage] = useState<Usage | null>(null);
+  const [muted, setMutedState] = useState(isMuted());
+
+  useEffect(() => {
+    installAudioUnlock();
+    return onMutedChange(setMutedState);
+  }, []);
 
   // Opening a panel zooms the camera onto who you're talking to; closing zooms out.
+  const dialogRef = useRef<InteractId | null>(null);
   const openDialog = useCallback((id: InteractId | null) => {
+    if (id !== dialogRef.current) (id ? sfx.open : sfx.close)();
+    dialogRef.current = id;
     setDialog(id);
     sceneRef.current?.focus(id === "tasks" ? null : id);
   }, []);
@@ -112,6 +122,7 @@ export default function App() {
     source.start((event) => {
       store.dispatch(event);
       directorRef.current?.onEvent(event);
+      onMarketEvent(event);
     });
     return () => {
       source.stop();
@@ -169,6 +180,15 @@ export default function App() {
               </button>
             )}
             <CostCompare state={state} />
+            <button
+              type="button"
+              className="ledger-toggle"
+              aria-pressed={!muted}
+              aria-label={muted ? "Turn sound on" : "Turn sound off"}
+              onClick={() => setMuted(!muted)}
+            >
+              {muted ? "♪ Off" : "♪ On"}
+            </button>
             <button type="button" className="ledger-toggle" aria-pressed={showLedger} onClick={() => { setShowLedger((v) => !v); setShowTools(false); }}>
               {showLedger ? (rawLedger ? "Hide ledger" : "Hide costs") : rawLedger ? "Show ledger" : "Costs"}
             </button>

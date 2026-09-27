@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { sfx } from "../audio/sfx";
 import { api, type LimitPeriod, type LimitsStatus } from "../api";
 
 const SHORT: Record<LimitPeriod["period"], string> = { day: "Today", week: "Week", month: "Month" };
@@ -24,6 +25,15 @@ export function SpendMeter({ refreshKey }: { refreshKey: unknown }) {
     const timer = window.setInterval(load, 5000);
     return () => window.clearInterval(timer);
   }, [refreshKey]);
+
+  // Alarm once when spending crosses a limit (not on load if already over).
+  const wasOver = useRef<boolean | null>(null);
+  useEffect(() => {
+    if (!status) return;
+    const over = headline(status).state === "over";
+    if (over && wasOver.current === false) sfx.alarm();
+    wasOver.current = over;
+  }, [status]);
 
   if (!status) return null;
   const top = headline(status);

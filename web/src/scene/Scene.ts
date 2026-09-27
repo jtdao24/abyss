@@ -16,6 +16,7 @@ import {
   type Ticker,
 } from "pixi.js";
 
+import { sfx } from "../audio/sfx";
 import type { AgentId, TaskType } from "../contract";
 import { Ambient, type AmbientData } from "./ambient";
 import { fitScale } from "./fit";
@@ -158,6 +159,8 @@ export class MarketScene {
   private walk: Point[] = [];
   private onArrive: (() => void) | null = null;
   private clock = 0;
+  /** Walking time since the player's last footstep sound. */
+  private stepMs = 0;
   private lastModel = "";
   private resizeObserver: ResizeObserver | null = null;
   private ambient!: Ambient;
@@ -429,7 +432,10 @@ export class MarketScene {
     const thing = hitTest(p, this.vendorPositions());
     const dest = standable(thing ? thing.approach : p);
     this.walkTo(dest, thing ? () => this.onInteract(thing.id) : null);
-    if (!thing) this.onGround();
+    if (!thing) {
+      sfx.click();
+      this.onGround();
+    }
     this.clickRing.position.set(dest.x, dest.y);
     this.clickAge = 0;
   }
@@ -501,6 +507,11 @@ export class MarketScene {
     }
     player.x += (dx / dist) * step;
     player.y += (dy / dist) * step;
+    this.stepMs += deltaMs;
+    if (this.stepMs >= 260) {
+      this.stepMs = 0;
+      sfx.step();
+    }
     if (Math.abs(dx) > 0.5) player.scale.x = (dx > 0 ? 1 : -1) * PEOPLE_SCALE;
     player.rotation = Math.sin(this.clock / 85) * 0.07;
   }
