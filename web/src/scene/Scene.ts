@@ -285,7 +285,10 @@ export class MarketScene {
     // The ripples own canvas textures and filters Pixi doesn't know to free:
     // unbind them first, or Pixi warns about textures destroyed while bound.
     this.ambient?.destroy();
-    this.app.destroy(true, { children: true, texture: true, textureSource: true });
+    // Leave the loaded art alone: the backdrop and characters come from Pixi's
+    // Assets cache and are shared with the next scene. (React's dev mode mounts
+    // the page twice, so destroying them here left the second scene black.)
+    this.app.destroy(true, { children: true });
   }
 
   /** Walk the player somewhere; `then` runs on arrival (a new click cancels it). */
