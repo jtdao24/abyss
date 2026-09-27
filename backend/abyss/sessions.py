@@ -88,6 +88,8 @@ class SessionStore:
                         "task_type": data["task_type"], "old": data["old"], "new": data["new"], "ratio": data["ratio"],
                     })
                     self._write(job_id, record)
+            elif kind == "steered" and (event.get("data") or {}).get("note", "").startswith("Stop:"):
+                self._update(job_id, stopped=True)  # the user pressed Stop (the final is still partial/ok)
             elif kind == "final":
                 data = event.get("data") or {}
                 self._update(job_id, final=data, status=data.get("status", "ok"), finished_at=time.time())

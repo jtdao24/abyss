@@ -33,6 +33,7 @@ class Guidance:
         self.stopped = True
         if self.ledger is not None:
             self.ledger.budget_usd = self.ledger.total_cost()
+            self.ledger.stopped = True
 
     def add(self, target: str, note: str) -> None:
         if target == "job":
@@ -75,6 +76,7 @@ async def run_job(
         guidance.ledger = ledger
         if guidance.stopped:  # stopped before the job even began
             ledger.budget_usd = 0.0
+            ledger.stopped = True
     tasks_won = {agent.agent_id: 0 for agent in config.AGENTS}
 
     try:
@@ -296,6 +298,7 @@ async def _package(
     if not completed:
         return None
     last_error = ""
+    capped = False
     for _ in range(2):
         try:
             filename, content, summary, usage = await assemble(
@@ -304,15 +307,19 @@ async def _package(
         except (LLMError, ValueError) as exc:
             last_error = str(exc)
             if isinstance(exc, BudgetExceeded):
+                capped = True
                 break
             continue
         await stream.emit("assembled", {"filename": filename, "summary": summary, "usage": usage})
         await stream.emit("stats", ledger.stats(tasks_won))
         return filename, content, summary
-    await stream.emit(
-        "error",
-        {"message": f"could not assemble the file, sending the last draft: {last_error}", "task_id": None, "fatal": False},
-    )
+    if capped:
+        # Stop / budget: packaging would be a new AI call, so the file is the last finished draft.
+        reason = "stopped by you" if ledger.stopped else last_error
+        message = f"{reason} — your file is the last finished draft (not packaged)"
+    else:
+        message = f"could not assemble the file, sending the last draft: {last_error}"
+    await stream.emit("error", {"message": message, "task_id": None, "fatal": False})
     return None
 
 
@@ -426,8 +433,11 @@ async def _run_auction(
         )
 
     if not scored:
+        # Bids cut off by Stop or the budget cap aren't vendor failures: say why.
+        failures = [result for result in results.values() if isinstance(result, BaseException)]
+        capped = failures and all(isinstance(result, BudgetExceeded) for result in failures)
         await _task_error(
-            stream, ledger, tasks_won, task.task_id, "all bids failed"
+            stream, ledger, tasks_won, task.task_id, str(failures[0]) if capped else "all bids failed"
         )
         return None
 

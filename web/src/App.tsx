@@ -15,6 +15,8 @@ import { store } from "./state/store";
 import { CostCompare } from "./ui/CostCompare";
 import { CostPanel } from "./ui/CostPanel";
 import { McpPanel } from "./ui/McpPanel";
+import { ResultPanel } from "./ui/ResultPanel";
+import { openResult, resultDoc, stoppedJobs } from "./ui/resultView";
 import { SpendMeter } from "./ui/SpendMeter";
 import { GameDialog } from "./ui/GameDialog";
 import { Ledger } from "./ui/Ledger";
@@ -169,6 +171,8 @@ export default function App() {
 
   const send = SOURCE === "ws" ? (message: ClientMsg) => sourceRef.current?.send?.(message) ?? false : undefined;
   const badge = modeBadge(state);
+  // The newest finished file stays one click away, even while the next job runs.
+  const lastFile = [...state.history].reverse().find((h) => h.final.deliverable) ?? null;
 
   return (
     <main className={`app-shell ${showLedger || showTools ? "" : "ledger-hidden"}`}>
@@ -200,6 +204,16 @@ export default function App() {
             <button type="button" className="ledger-toggle" aria-pressed={showLedger} onClick={() => { setShowLedger((v) => !v); setShowTools(false); }}>
               {rawLedger ? "Ledger" : "Costs"}
             </button>
+            {lastFile && (
+              <button
+                type="button"
+                className="ledger-toggle file-toggle"
+                title={`Open ${lastFile.final.filename ?? "the finished file"}`}
+                onClick={() => openResult(resultDoc(lastFile.final, lastFile.jobText, stoppedJobs(state.log).has(lastFile.jobId)))}
+              >
+                File
+              </button>
+            )}
             <button
               type="button"
               className="ledger-toggle sound-toggle"
@@ -236,6 +250,7 @@ export default function App() {
         </div>
       </section>
       {showTools && !showLedger && <McpPanel onClose={() => setShowTools(false)} />}
+      <ResultPanel />
       {showLedger &&
         (rawLedger || SOURCE !== "ws" ? (
           <Ledger state={state} />

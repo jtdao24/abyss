@@ -6,9 +6,14 @@ import { sfx } from "../audio/sfx";
 import { api, type Attachment, type McpServer, type Provider, type SessionRecord, type SessionSummary } from "../api";
 import type { AbyssEvent, AgentId, ClientMsg } from "../contract";
 import type { MarketState } from "../state/reducer";
+import { downloadText, openResult, resultDoc, stoppedJobs } from "./resultView";
 
 type Tone = "plain" | "dim" | "bold" | "cyan" | "green" | "yellow" | "red" | "echo";
-type Line = { text: string; tone: Tone };
+type Line = { text: string; tone: Tone; action?: { label: string; run: () => void } };
+/** What describe() needs beyond the event: which jobs were stopped, and each job's text. */
+type Context = { stopped: Set<string>; jobText: Map<string, string>; /** jobs whose cut-off was already said once */ said: Set<string> };
+/** Stop and the budget cap end work on purpose: said calmly, not as failures. */
+const CUT_OFF = /^(stopped by you|budget reached)/;
 
 const VENDOR: Record<AgentId, string> = { opus: "Vendor 1", sonnet: "Vendor 2", haiku: "Vendor 3" };
 const STEER_TARGET: Record<string, "job" | AgentId> = {
@@ -40,14 +45,14 @@ const HELP: Line[] = [
   ["  /tools [on|off <name>|all]  which tool servers the vendors may use", "plain"],
   ["  /examples  /example <n>     sample jobs (puts one on the prompt)", "plain"],
   ["  /estimate                   what a typical job costs", "plain"],
-  ["  /result  /save              read or download the finished file", "plain"],
-  ["  /sessions  /open <n>        past sessions", "plain"],
+  ["  /result  /save              open or download the finished file", "plain"],
+  ["  /sessions  /open <n>        past sessions (open shows the file)", "plain"],
   ["  /status  /reset  /clear  /exit", "plain"],
   ["  ↑ ↓ recall earlier lines · Esc closes", "dim"],
 ].map(([text, tone]) => ({ text, tone: tone as Tone }));
 
 /** One event as terminal lines (the same wording as the Python terminal chat). */
-function describe(ev: AbyssEvent): Line[] {
+function describe(ev: AbyssEvent, ctx: Context): Line[] {
   switch (ev.type) {
     case "hello": {
       const c = ev.data.config;
@@ -64,6 +69,7 @@ function describe(ev: AbyssEvent): Line[] {
     case "bid": {
       const who = VENDOR[ev.data.agent_id];
       if (!ev.data.ok) {
+        if (CUT_OFF.test(ev.data.error ?? "")) return []; // the task's own line says why
         const standby = (ev.data.error ?? "").startsWith("standby");
         return [{ text: `   ${who} ${standby ? "is on standby (backup only)" : "passed"}`, tone: "dim" }];
       }
@@ -86,34 +92,44 @@ function describe(ev: AbyssEvent): Line[] {
       return [{ text: `   ${VENDOR[ev.data.agent_id]} ${ev.data.task_type} reputation ${ev.data.old.toFixed(3)} → ${ev.data.new.toFixed(3)} ${delta > 0 ? "▲" : delta < 0 ? "▼" : "="}`, tone: "dim" }];
     }
     case "steered":
+      if (ev.data.target === "job" && ev.data.note.startsWith("Stop:"))
+        return [{ text: "   ■ Stopping: work already started finishes, no new AI calls start", tone: "yellow" }];
       return [{ text: `   ✎ noted for ${ev.data.target === "job" ? "every vendor" : VENDOR[ev.data.target]}: "${ev.data.note}" (applies from their next piece of work)`, tone: "yellow" }];
     case "assembled":
       return [{ text: "", tone: "plain" }, { text: `📦 Main agent is packaging everything into ${ev.data.filename}`, tone: "bold" }];
     case "final": {
       const f = ev.data;
-      if (!f.deliverable || !f.filename) return [{ text: `✗ The job ended (${f.status}) without a file.`, tone: "red" }];
+      const stopped = ev.job_id !== null && ctx.stopped.has(ev.job_id);
+      if (!f.deliverable || !f.filename)
+        return stopped
+          ? [{ text: "■ Stopped before anything was finished: no file.", tone: "yellow" }]
+          : [{ text: `✗ The job ended (${f.status}) without a file.`, tone: "red" }];
+      const open = () => openResult(resultDoc(f, ctx.jobText.get(ev.job_id ?? "") ?? null, stopped));
       return [
         { text: "", tone: "plain" },
-        { text: `✅ Done! Your file is ready: ${f.filename}  (/save downloads it, /result shows it)`, tone: "green" },
+        stopped
+          ? { text: `■ Stopped. Your file has what was finished: ${f.filename}`, tone: "yellow", action: { label: "Open file", run: open } }
+          : { text: `✅ Done! Your file is ready: ${f.filename}`, tone: "green", action: { label: "Open file", run: open } },
         ...(f.summary ? [{ text: `   ${f.summary}`, tone: "plain" as Tone }] : []),
         { text: `   mean grade ${f.mean_grade ?? "—"}/10 · total cost $${f.total_cost_usd.toFixed(4)} · ${(f.duration_ms / 1000).toFixed(1)}s`, tone: "dim" },
       ];
     }
-    case "error":
-      return [{ text: `   ⚠ ${ev.data.message}`, tone: "red" }];
+    case "error": {
+      const m = ev.data.message;
+      if (CUT_OFF.test(m)) {
+        // Said once per job; each later task it cut off just gets a short line.
+        const key = ev.job_id ?? "";
+        const draft = /your file is .*/.exec(m)?.[0];
+        if (draft && ctx.said.has(key)) return [{ text: `   ■ Y${draft.slice(1)}`, tone: "yellow" }];
+        if (ctx.said.has(key)) return ev.data.task_id ? [{ text: `   ■ ${ev.data.task_id.toUpperCase()} skipped`, tone: "yellow" }] : [];
+        ctx.said.add(key);
+        return [{ text: `   ■ ${m[0].toUpperCase()}${m.slice(1)}`, tone: "yellow" }];
+      }
+      return [{ text: `   ⚠ ${m}`, tone: "red" }];
+    }
     default:
       return [];
   }
-}
-
-/** Save the finished file from the browser. */
-function download(filename: string, text: string): void {
-  const url = URL.createObjectURL(new Blob([text], { type: "text/plain;charset=utf-8" }));
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  link.click();
-  URL.revokeObjectURL(url);
 }
 
 // The terminal outlives its window: closing the Captain and coming back keeps
@@ -194,8 +210,8 @@ export function CaptainTerminal({ state, onClose, send, providers = [], sessions
   const stop = () => {
     if (needLive()) return;
     if (!running) return print({ text: "no job is running to stop", tone: "yellow" });
-    send!({ type: "stop_job" });
-    print({ text: "stopping: the crew finishes what's in hand, then no new AI calls", tone: "yellow" });
+    // The server's "Stopping" note confirms it (every open window sees that).
+    if (!send!({ type: "stop_job" })) print({ text: "couldn't send that: the connection dropped", tone: "red" });
   };
 
   const rerun = (record: SessionRecord) => {
@@ -396,14 +412,15 @@ export function CaptainTerminal({ state, onClose, send, providers = [], sessions
         send!({ type: "reset" });
         return print({ text: "reputations reset", tone: "dim" });
       case "result": {
-        const f = state.final;
-        if (!f?.deliverable) return print({ text: "no finished file yet", tone: "dim" });
-        return print({ text: `── ${f.filename ?? "result"} ──`, tone: "cyan" }, ...f.deliverable.split("\n"), { text: "── end ──", tone: "cyan" });
+        const last = [...state.history].reverse().find((h) => h.final.deliverable);
+        if (!last) return print({ text: "no finished file yet", tone: "dim" });
+        openResult(resultDoc(last.final, last.jobText, stoppedJobs(state.log).has(last.jobId)));
+        return print({ text: `opened ${last.final.filename ?? "result.md"}`, tone: "dim" });
       }
       case "save": {
-        const f = state.final;
+        const f = [...state.history].reverse().find((h) => h.final.deliverable)?.final;
         if (!f?.deliverable) return print({ text: "no finished file yet", tone: "dim" });
-        download(f.filename ?? "result.md", f.deliverable);
+        downloadText(f.filename ?? "result.md", f.deliverable);
         return print({ text: `downloading ${f.filename ?? "result.md"}`, tone: "green" });
       }
       case "sessions":
@@ -418,9 +435,9 @@ export function CaptainTerminal({ state, onClose, send, providers = [], sessions
         api.session(s.id).then(
           (record) => {
             const f = record.final;
-            print({ text: `── ${record.job_text} ──`, tone: "cyan" });
             if (!f?.deliverable) return print({ text: `this session ended without a file (${record.status})`, tone: "dim" });
-            print(...f.deliverable.split("\n"), { text: `── ${f.filename ?? "result"} · grade ${f.mean_grade ?? "—"}/10 · $${f.total_cost_usd.toFixed(4)} ──`, tone: "cyan" });
+            openResult(resultDoc(f, record.job_text, Boolean(record.stopped) || record.status === "stopped"));
+            print({ text: `opened ${f.filename ?? "result.md"} from "${record.job_text.slice(0, 60)}"`, tone: "dim" });
           },
           () => print({ text: "couldn't load that session", tone: "red" }),
         );
@@ -441,11 +458,27 @@ export function CaptainTerminal({ state, onClose, send, providers = [], sessions
     localByEvent.set(key, [...(localByEvent.get(key) ?? []), l]);
   }
   const pushLines = (key: string, lines: Line[]) =>
-    lines.forEach((line, i) => rows.push(<div key={`${key}-${i}`} className={`t-${line.tone}`}>{line.text || " "}</div>));
+    lines.forEach((line, i) =>
+      rows.push(
+        <div key={`${key}-${i}`} className={`t-${line.tone}`}>
+          {line.text || " "}
+          {line.action && (
+            <button type="button" className="ct-action" onClick={line.action.run}>
+              {line.action.label}
+            </button>
+          )}
+        </div>,
+      ),
+    );
+  const ctx: Context = {
+    stopped: stoppedJobs(state.log),
+    said: new Set(),
+    jobText: new Map(state.log.filter((e) => e.type === "job_split" && e.job_id).map((e) => [e.job_id!, (e.data as { job_text: string }).job_text])),
+  };
   localByEvent.get(null)?.forEach((l) => pushLines(`l${l.id}`, l.lines));
   const clearedAt = term.clearedAfterEvent ? state.log.indexOf(term.clearedAfterEvent) : -1;
   state.log.forEach((ev, index) => {
-    if (index > clearedAt) pushLines(`e${ev.seq}-${index}`, describe(ev));
+    if (index > clearedAt) pushLines(`e${ev.seq}-${index}`, describe(ev, ctx));
     localByEvent.get(ev)?.forEach((l) => pushLines(`l${l.id}`, l.lines));
   });
 
