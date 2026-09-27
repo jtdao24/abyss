@@ -149,7 +149,7 @@ export default function App() {
         <header className="stage-header">
           <div className="title">
             <strong>ABYSS</strong>
-            <small>Click the Captain on the boat to start a session. Click anyone else to zoom in and watch.</small>
+            <small>Click the Captain on the boat to open the terminal and type a job (python start.py --chat works too). Click anyone to zoom in.</small>
           </div>
           <div className="header-actions">
             <CostCompare state={state} />
