@@ -78,29 +78,34 @@ th { color: #7fb7b6; }
 
 .app-shell.ledger-hidden { grid-template-columns: 1fr; }
 .header-actions { display: flex; align-items: center; gap: 10px; }
+/* Header controls use the readable UI font: the pixel font turns small "C"s into "O"s. */
 .ledger-toggle {
-  padding: 4px 8px;
-  color: var(--abyss-text-soft);
+  padding: 6px 14px;
+  color: var(--abyss-text);
   background: var(--abyss-bg2);
   border: 2px solid var(--abyss-line2);
+  border-radius: 6px;
   cursor: pointer;
-  font-size: 10px;
+  font: 600 13px var(--font-ui);
+  transition: background 120ms, border-color 120ms;
 }
+.ledger-toggle:hover { background: #1b3a50; border-color: var(--abyss-teal); }
+.ledger-toggle[aria-pressed="true"] { color: var(--abyss-bg0); background: var(--abyss-gold); border-color: var(--abyss-gold-deep); }
 .stage-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   color: var(--abyss-gold);
-  font-size: 14px;
+  font-size: 16px;
 }
-.mode-badge { padding: 4px 8px; font-size: 10px; color: var(--abyss-bg0); background: #8eaab7; }
+.mode-badge { padding: 5px 10px; font: 700 12px var(--font-ui); letter-spacing: 0.04em; color: var(--abyss-bg0); background: #8eaab7; border-radius: 999px; }
 .mode-badge.live { background: var(--abyss-good-soft); }
 .mode-badge.test { background: var(--abyss-gold-deep); }
 .mode-badge.fake { background: var(--abyss-teal); }
 .mode-badge.offline { color: #fff; background: #a33; }
 
 .stage-header .title { display: grid; gap: 4px; }
-.stage-header .title small { color: var(--abyss-text-dim); font-size: 9px; }
+.stage-header .title small { color: var(--abyss-text-dim); font: 13px var(--font-ui); }
 
 /* ---- RPG dialog ---- */
 .rpg-dialog {
@@ -275,7 +280,7 @@ th { color: #7fb7b6; }
   cursor: help;
 }
 .cost-compare.idle { gap: 8px; color: var(--abyss-text-dim); cursor: default; }
-.cost-compare.idle span { font-family: var(--font-pixel); font-size: 9px; color: var(--abyss-teal); }
+.cost-compare.idle span { font-weight: 600; color: var(--abyss-teal); }
 .cc-rows { display: grid; gap: 4px; }
 .cc-rows div { display: grid; grid-template-columns: 104px 80px 62px; align-items: center; gap: 8px; }
 .cc-rows span { color: var(--abyss-text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

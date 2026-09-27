@@ -168,7 +168,7 @@ export default function App() {
               </button>
             )}
             <CostCompare state={state} />
-            <button type="button" className="ledger-toggle" onClick={() => { setShowLedger((v) => !v); setShowTools(false); }}>
+            <button type="button" className="ledger-toggle" aria-pressed={showLedger} onClick={() => { setShowLedger((v) => !v); setShowTools(false); }}>
               {showLedger ? (rawLedger ? "Hide ledger" : "Hide costs") : rawLedger ? "Show ledger" : "Costs"}
             </button>
             <span className={`mode-badge ${badge.tone}`}>{badge.label}</span>

@@ -81,7 +81,8 @@ function bubbleFor(agentId: AgentId, task: TaskView | null): StallModel["bubble"
   if (task.winner !== agentId) return null;
   if (task.status === "assigned") return { text: "WON!", tone: "won" };
   if (task.status === "working") return { text: "WORKING", tone: "working" };
-  if (task.status === "done" || task.status === "graded") return { text: "DONE", tone: "done" };
+  // Only while the work is on its way to the reviewer: once graded, the grade pops up and the bubble goes.
+  if (task.status === "done") return { text: "DONE", tone: "done" };
   return null;
 }
 
