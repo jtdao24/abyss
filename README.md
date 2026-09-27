@@ -67,17 +67,39 @@ When you start a session, the Captain lets you pick which servers the vendors
 may use. Local servers need Node.js (`npx`) or uv (`uvx`). Tool rounds are
 billed like any other call and count toward the budget cap.
 
-## The chat
+## The Captain
+
+Click the Main Agent on the boat to open the Captain terminal. Type a job and press Enter, or use a command (`/help` lists them all):
 
 | command | |
 |---|---|
-| *any text* | give the main agent a job |
+| *any text* | give the main agent a job (while one runs, it waits in the queue) |
 | `/steer <1\|2\|3\|job> <note>` | steer one vendor, or the whole job, mid-run |
+| `/stop` (or the red **stop** button) | stop the running job: work in hand finishes, no new AI calls start |
+| `/queue`, `/unqueue <n>` | list queued jobs, remove one |
+| `/sessions`, `/open <n>`, `/rerun [n]` | past sessions; run one again with the same job, AI, budget, tools and files |
 | `/price <0-5>` | how much price matters when choosing a vendor (0 = quality only) |
-| `/reset` | reset every vendor's reputation |
-| `/status` | what's running |
+| `/budget <usd\|off>` | hard spending cap for your next job |
+| `/ai [name]` | pick the AI for your next job |
+| `/link <url>`, `/file` | attach a link or a file to your next job |
+| `/tools [on\|off <name>\|all]` | which tool servers the vendors may use |
+| `/examples`, `/example <n>` | sample jobs |
+| `/estimate` | what a typical job costs |
+| `/result`, `/save` | read or download the finished file |
+| `/status`, `/reset`, `/clear`, `/exit` | what's running; reset every vendor's reputation; clear; close |
 
-Run it with `python start.py --chat`. The market shows vendor names, not models; the table above says which model runs each stall, and the ledger shows the exact model of every call.
+There's also a plain terminal chat (`python start.py --chat`) with `/steer`, `/price`, `/reset` and `/status`. It shares the same market as the browser.
+
+The market shows vendor names, not models. The table above says which model runs each stall, and the ledger shows the exact model of every call.
+
+## Spending
+
+- **Per job:** `/budget` sets a hard cap. The crew stops starting AI calls when it runs out.
+- **Per day, week and month:** click the spend meter in the bottom-right corner to set limits. At 80% the page warns you; at 100% new sessions are refused and a running one is capped to what's left.
+- **Right now:** `/stop` ends the running job.
+- **Costs:** the **Costs** button in the header shows what each session cost and what the premium vendor alone would have cost.
+
+The header's **♪** button turns the 8-bit sound effects on or off (remembered per browser).
 
 ## How the market works
 
@@ -86,7 +108,7 @@ score = promised_quality × reputation − price_weight × predicted_cost_in_cen
 reputation ← reputation + 0.3 × (grade / promised_quality − reputation)
 ```
 
-A vendor that promises 9 and delivers 6 ends up with a reputation below 1.0, so its future promises are worth less. Reputation is tracked per vendor and per task type, and it persists in `runs/reputation.json`. [SPEC.md](SPEC.md) is the full contract: auction, failure policy, the event stream and the ledger format.
+A vendor that promises 9 and delivers 6 ends up with a reputation below 1.0, so its future promises are worth less. The premium vendor is a backup: it only bids on a task type once the cheaper vendors' reputation there drops below 0.9, or when all their bids fail (or at price weight 0). Reputation is tracked per vendor and per task type, and it persists in `runs/reputation.json`. [SPEC.md](SPEC.md) is the full contract: auction, failure policy, the event stream and the ledger format.
 
 ## Other things you can run
 
@@ -103,9 +125,10 @@ In the browser:
 
 - `?source=fixture&file=fake_run&speed=2` replays a recording from `fixtures/` (no backend needed)
 - `?view=results` shows experiment results from `experiments/results/`
-- `?ledger=1` opens the ledger panel
+- `?ledger=1` opens the raw call ledger instead of the cost dashboard
+- `?calm=1` turns off the rippling water and swaying leaves (for slow machines)
 
-Frontend tests: `cd web && npm test`.
+Frontend tests: `cd web && npm test`. GitHub Actions runs the backend tests, the frontend tests and the web build on every pull request.
 
 ## Project layout
 
@@ -114,7 +137,8 @@ backend/abyss/   FastAPI + WebSocket server, market loop, LLM gateway (the only 
 web/src/         React + PixiJS v8 market view
 fixtures/        canonical recorded run used by tests and replay
 experiments/     experiment jobs and results
-runs/            your local ledger, reputation, logs (gitignored)
+runs/            your local ledger, reputation, sessions, limits, logs (gitignored)
+.github/         CI workflow
 ```
 
 ## License

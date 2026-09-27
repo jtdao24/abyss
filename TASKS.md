@@ -1,7 +1,8 @@
 # Abyss — TASKS
 
-The orchestrator (Claude) plans, specs and reviews. **Codex writes all feature code.**
-Each task is one Codex session. Paste the whole task block into Codex together with `SPEC.md`.
+This is the original 36-hour build plan. The orchestrator (Claude) planned, specced and reviewed; Codex wrote the feature code, one session per task.
+
+> **Historical.** T01–T12 are kept as they were written. They were built on Anthropic models (Haiku / Sonnet / Opus, the `anthropic` SDK, `ANTHROPIC_API_KEY`). Abyss has since moved to **OpenAI and Meta Muse Spark** through the OpenAI SDK. The `haiku` / `sonnet` / `opus` agent ids stayed as frozen contract ids for the budget / standard / premium stalls. Numbers in the old briefs (fixture event count and total, model names and prices) are out of date. [SPEC.md](SPEC.md) and [README.md](README.md) describe the app as it is now.
 
 ## How to use this file
 
@@ -15,9 +16,9 @@ Each task is one Codex session. Paste the whole task block into Codex together w
   5. Reply with a numbered list of required changes, or **ACCEPTED**.
 - **Global constraints (apply to every task):**
   - Python 3.11, `async` everywhere on the request path. No database, LangChain, CrewAI or ORMs.
-  - Only `backend/abyss/llm.py` may `import anthropic`.
-  - Tests never hit the network. They use `ABYSS_FAKE_LLM=1` or pure functions.
-  - Real API calls during development use Haiku test mode only (the default, SPEC §1.5). **Never set `ABYSS_REAL_MODELS=1` without orchestrator approval.**
+  - Only `backend/abyss/llm.py` may call a model (it's the only module that imports `openai`).
+  - Tests never hit the network. They use `ABYSS_FAKE_LLM=1` or pure functions (`tests/conftest.py` sets test mode and keeps real keys, MCP servers and limits out). CI runs them on every pull request.
+  - Real API calls during development: use test mode (`python start.py --test` / `ABYSS_TEST_MODE=1`), which runs every call on the budget model. Real models are now the default, so be deliberate about cost.
   - Frontend is TypeScript, pixi.js **v8** and React 18. Don't use `@pixi/react`: Pixi is driven imperatively inside one `useEffect`.
   - Prefer boring code: no metaprogramming, no clever abstractions, no new dependencies beyond those named in the task.
 
@@ -38,8 +39,23 @@ Each task is one Codex session. Paste the whole task block into Codex together w
 | T10 | Connect: WS source, job input, deliverable panel | F | 5 | T06, T07 | 2h | ✅ merged |
 | T11 | Cost/quality experiment runner | B | 6 | T05 | 3h | ✅ merged |
 | T12 | Experiment results view | F | 6 | T11, T07 | 2h | ✅ merged |
-| T13 | Polish pass | F/B | 7 | T10 | ≤4h | ⬜ |
-| T14 | Freeze: README, demo recording, demo script | orch+B | 8 | all | 2h | ⬜ |
+| T13 | Polish pass | F/B | 7 | T10 | ≤4h | 🟨 mostly done (see T13) |
+| T14 | Freeze: README, demo recording, demo script | orch+B | 8 | all | 2h | 🟨 README done; demo recording, script and tag open |
+
+### Since the build plan
+
+Shipped after T12, outside this plan (see the git log and pull requests):
+
+| Feature | Where |
+|---|---|
+| OpenAI and Meta Muse Spark instead of Anthropic; `start.py` one-command launcher | `config.py`, `llm.py`, `start.py` |
+| Terminal chat, shared broadcast market, the main agent's `assemble` step (a file to Downloads) | `chat.py`, `assembler.py`, `server.py` |
+| Captain terminal, saved sessions, cost dashboard, attachments, per-job budget cap, cost estimate, vendor track records | `web/src/ui/*`, `sessions.py`, `attachments.py`, `estimate.py` |
+| GPT-6 tiers, premium vendor as a backup, simpler ledger | `config.py`, `market.py` |
+| MCP tools: catalog, Tools panel, per-session tool picks, activity feed | `tools.py`, `mcp_admin.py`, `mcp_catalog.py`, `McpPanel.tsx` |
+| Day / week / month spending limits and the spend meter | `limits.py`, `SpendMeter.tsx` |
+| Stop, session queue, run again, CI | `server.py`, `CaptainTerminal.tsx`, `.github/workflows/ci.yml` |
+| 8-bit sound effects with a mute button | `web/src/audio/` |
 
 ## Timeline and cut rules (36h, hours from kickoff)
 
@@ -560,14 +576,14 @@ async def run_job(job_text: str, *, stream: EventStream, llm: LLM, rep: Reputati
 ## T13 — Polish (time-boxed; first to cut)
 Pick in this order and stop at the time box. Each item is a separate mini-brief I'll write when we get there:
 
-1. Rep sparkline history per stall (needs `rep_update` history in the reducer).
-2. A "vs all-Opus" line in the HUD using the experiment's measured ratio (static number from the results file, clearly labelled as measured offline).
-3. Sound blips on bid, won and graded (WebAudio oscillator; no assets).
-4. A job presets dropdown (the 6 experiment jobs).
-5. Idle ambient animation (gulls, boats).
+1. ⬜ Rep sparkline history per stall (needs `rep_update` history in the reducer). *Not done: the vendor panel shows current reputation bars only. The cost dashboard has a cost sparkline.*
+2. ✅ A "vs all-Opus" line in the HUD. *Done differently: `CostCompare` shows this job vs the top model doing it all, computed live from prices rather than from the experiment results.*
+3. ✅ Sound blips on bid, won and graded. *Done as full 8-bit sound effects (`web/src/audio/`), with a mute button.*
+4. ✅ A job presets dropdown. *Done as `/examples` and `/example <n>` in the Captain terminal.*
+5. 🟨 Idle ambient animation. *Water, foliage, glints, lanterns and leaves are in `scene/ambient.ts`; gulls and boats aren't.*
 
 ## T14 — Freeze
-- README: what it is, the 3-command run (backend, frontend, fixture-only mode), env vars, cost safety, and the experiment headline table.
-- Record a real-model demo run (`--record fixtures/demo_run.json`, with approval), so the demo can fall back to `?source=fixture&file=demo_run` if the network fails.
-- Demo script: 90 seconds covering job → bids → surprise winner → grade → rep drop → final cost → experiment chart.
-- Tag `v1-demo`.
+- ✅ README: what it is, the one-command run (`python start.py`), fixture replay, env vars and cost safety. ⬜ The experiment headline table is still missing (no results in `experiments/results/` yet).
+- ⬜ Record a real-model demo run (`--record fixtures/demo_run.json`, with approval), so the demo can fall back to `?source=fixture&file=demo_run` if the network fails.
+- ⬜ Demo script: 90 seconds covering job → bids → surprise winner → grade → rep drop → final cost → experiment chart.
+- ⬜ Tag `v1-demo`.
