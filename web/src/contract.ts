@@ -200,6 +200,7 @@ export type AbyssEvent =
   | Envelope<"assembled", AssembledData>;
 
 export type ClientMsg =
-  | { type: "start_job"; job: string; price_weight?: number; provider?: string; budget_usd?: number; attachments?: string[]; tools?: string[] }
+  | { type: "start_job"; job: string; price_weight?: number; provider?: string; budget_usd?: number; attachments?: string[]; tools?: string[]; queue?: boolean }
+  | { type: "stop_job" }
   | { type: "reset" }
   | { type: "steer"; target: "job" | AgentId; note: string };

@@ -2,7 +2,7 @@
 // market streams its progress back, line by line, like `python -m abyss.chat`.
 import { useEffect, useReducer, useRef, useState, type ReactNode } from "react";
 
-import { api, type Attachment, type McpServer, type Provider, type SessionSummary } from "../api";
+import { api, type Attachment, type McpServer, type Provider, type SessionRecord, type SessionSummary } from "../api";
 import type { AbyssEvent, AgentId, ClientMsg } from "../contract";
 import type { MarketState } from "../state/reducer";
 
@@ -29,6 +29,9 @@ const EXAMPLES = [
 const HELP: Line[] = [
   ["Type a job and press Enter. Commands:", "bold"],
   ["  /steer <1|2|3|job> <note>   steer a vendor (or everyone) mid-job", "plain"],
+  ["  /stop                       stop the running job (no new AI calls)", "plain"],
+  ["  /queue  /unqueue <n>        jobs typed while one runs wait in line", "plain"],
+  ["  /rerun [n]                  run a past session again (/sessions numbers)", "plain"],
   ["  /price <0-5>                how much price matters (0 = quality only)", "plain"],
   ["  /budget <usd|off>           hard spending cap for your next job", "plain"],
   ["  /ai [name]                  pick the AI for your next job", "plain"],
@@ -187,6 +190,27 @@ export function CaptainTerminal({ state, onClose, send, providers = [], sessions
     }
   };
 
+  const stop = () => {
+    if (needLive()) return;
+    if (!running) return print({ text: "no job is running to stop", tone: "yellow" });
+    send!({ type: "stop_job" });
+    print({ text: "stopping: the crew finishes what's in hand, then no new AI calls", tone: "yellow" });
+  };
+
+  const rerun = (record: SessionRecord) => {
+    const sent = send!({
+      type: "start_job",
+      job: record.job_text,
+      ...(record.provider ? { provider: record.provider } : {}),
+      ...(record.budget_usd != null ? { budget_usd: record.budget_usd } : {}),
+      ...(record.attachment_ids?.length ? { attachments: record.attachment_ids } : {}),
+      ...(record.tools ? { tools: record.tools } : {}),
+      ...(running ? { queue: true } : {}),
+    });
+    if (!sent) return print({ text: "couldn't send that: the connection dropped", tone: "red" });
+    print({ text: `${running ? "queued" : "running"} again: "${record.job_text.slice(0, 70)}" (same AI, budget, tools and files)`, tone: "dim" });
+  };
+
   const needLive = () => {
     if (live) return false;
     print({ text: "not in a replay: run python start.py to use the live market", tone: "yellow" });
@@ -200,7 +224,6 @@ export function CaptainTerminal({ state, onClose, send, providers = [], sessions
     print({ text: `you › ${text}`, tone: "echo" });
     if (!text.startsWith("/")) {
       if (needLive()) return;
-      if (running) return print({ text: "A job is already running. Steer it with /steer, or wait for it to finish.", tone: "yellow" });
       if (!state.connected) return print({ text: "not connected to the market yet", tone: "red" });
       const sent = send!({
         type: "start_job",
@@ -211,9 +234,12 @@ export function CaptainTerminal({ state, onClose, send, providers = [], sessions
         ...(term.attachments.length ? { attachments: term.attachments.map((a) => a.id) } : {}),
         // Tools are all on unless you switched some off (then send the ones still on).
         ...(term.toolsOff.length ? { tools: term.toolServers.map((t) => t.name).filter((n) => !term.toolsOff.includes(n)) } : {}),
+        // Busy? Wait in line instead of being refused.
+        ...(running ? { queue: true } : {}),
       });
       if (!sent) return print({ text: "couldn't send that: the connection dropped", tone: "red" });
       term.attachments = [];
+      if (running) return print({ text: "The crew is busy: your job is queued and starts when this one ends (/queue).", tone: "yellow" });
       return print({ text: "Sent to the main agent. Watch the market, or follow along here.", tone: "dim" });
     }
 
@@ -229,7 +255,7 @@ export function CaptainTerminal({ state, onClose, send, providers = [], sessions
         term.clearedAfterEvent = state.log.at(-1) ?? null;
         return rerender();
       case "status": {
-        const bits = [running ? "a job is running" : "the market is idle", `price weight ${term.priceWeight}`];
+        const bits = [running ? "a job is running (/stop to stop it)" : "the market is idle", `price weight ${term.priceWeight}`];
         if (term.budget !== null) bits.push(`budget $${term.budget}`);
         if (term.provider) bits.push(`AI ${term.provider}`);
         if (term.attachments.length) bits.push(`${term.attachments.length} attached`);
@@ -332,6 +358,38 @@ export function CaptainTerminal({ state, onClose, send, providers = [], sessions
         send!({ type: "steer", target, note });
         return;
       }
+      case "stop":
+        return stop();
+      case "queue":
+        if (needLive()) return;
+        api.queue().then(
+          (q) => {
+            if (!q.queue.length) return print({ text: "nothing queued", tone: "dim" });
+            print(...q.queue.map((item, i) => `  ${i + 1}. ${item.job.slice(0, 70)}`), { text: "/unqueue <n> removes one", tone: "dim" });
+          },
+          () => print({ text: "couldn't read the queue", tone: "red" }),
+        );
+        return;
+      case "unqueue": {
+        if (needLive()) return;
+        const n = Number(rest);
+        api.queue().then((q) => {
+          const item = q.queue[n - 1];
+          if (!item) return print({ text: "usage: /unqueue <n> (see /queue)", tone: "red" });
+          api.dequeue(item.id).then(
+            () => print({ text: `removed "${item.job.slice(0, 60)}" from the queue`, tone: "dim" }),
+            () => print({ text: "couldn't remove it", tone: "red" }),
+          );
+        });
+        return;
+      }
+      case "rerun": case "again": {
+        if (needLive()) return;
+        const s = sessions[(rest ? Number(rest) : 1) - 1];
+        if (!s) return print({ text: "usage: /rerun [n] (see /sessions; no number = the latest)", tone: "red" });
+        api.session(s.id).then(rerun, () => print({ text: "couldn't load that session", tone: "red" }));
+        return;
+      }
       case "reset":
         if (needLive()) return;
         send!({ type: "reset" });
@@ -351,7 +409,7 @@ export function CaptainTerminal({ state, onClose, send, providers = [], sessions
         if (!sessions.length) return print({ text: "no saved sessions yet", tone: "dim" });
         return print(
           ...sessions.slice(0, 10).map((s, i) => `  ${i + 1}. ${s.job_text.slice(0, 60)}${s.job_text.length > 60 ? "…" : ""}  · $${s.cost_usd.toFixed(4)}${s.mean_grade != null ? ` · ${s.mean_grade}/10` : ""}`),
-          { text: "/open <n> shows one", tone: "dim" },
+          { text: "/open <n> shows one · /rerun <n> runs it again", tone: "dim" },
         );
       case "open": {
         const s = sessions[Number(rest) - 1];
@@ -396,6 +454,11 @@ export function CaptainTerminal({ state, onClose, send, providers = [], sessions
         <span className="ct-dots"><i /><i /><i /></span>
         <strong>captain@abyss</strong>
         <em className={running ? "busy" : ""}>{running ? "job running" : live ? (state.connected ? "ready" : "connecting…") : "replay"}</em>
+        {running && live && (
+          <button type="button" className="ct-stop" onClick={stop} title="Stop the job: no new AI calls">
+            ■ stop
+          </button>
+        )}
         <button type="button" onClick={onClose} aria-label="Close">×</button>
       </div>
       <div className="ct-screen" ref={screen} onClick={() => window.getSelection()?.isCollapsed && field.current?.focus()} aria-live="polite">
