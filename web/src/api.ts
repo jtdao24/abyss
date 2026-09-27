@@ -43,6 +43,9 @@ export interface SessionRecord {
   id: string;
   job_text: string;
   provider: string | null;
+  budget_usd?: number | null;
+  tools?: string[] | null;
+  attachment_ids?: string[];
   status: string;
   started_at: number;
   stats: StatsData | null;
@@ -93,6 +96,13 @@ export interface VendorStats {
   reputation: Record<string, number>;
   /** Reputation per task type after each update, oldest first. */
   history: Record<string, { job_id: string; t: number | null; value: number; ratio: number }[]>;
+}
+
+export interface QueueStatus {
+  running: boolean;
+  stopping: boolean;
+  queue: { id: string; job: string; provider: string | null; queued_at: number }[];
+  dropped: { id: string; job: string; reason: string; t: number }[];
 }
 
 export interface LimitPeriod {
@@ -192,6 +202,12 @@ export const api = {
   attachLink: (url: string) => postJson<Attachment>("/api/attachments", { url }),
   vendors: () => getJson<{ vendors: Record<string, VendorStats>; sessions: number }>("/api/vendors"),
   limits: () => getJson<LimitsStatus>("/api/limits"),
+  queue: () => getJson<QueueStatus>("/api/queue"),
+  dequeue: async (id: string) => {
+    const response = await fetch(`/api/queue/${encodeURIComponent(id)}`, { method: "DELETE" });
+    if (!response.ok) throw new Error(`request failed (${response.status})`);
+    return (await response.json()) as QueueStatus;
+  },
   setLimits: (body: Partial<Record<"day" | "week" | "month", number | null>>) => postJson<LimitsStatus>("/api/limits", body),
   mcp: () => getJson<McpOverview>("/api/mcp"),
   mcpAdd: (body: {

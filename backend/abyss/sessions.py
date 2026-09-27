@@ -7,6 +7,7 @@ the ledger. Event shapes are untouched; this only listens.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import time
@@ -39,9 +40,11 @@ class SessionStore:
         budget_usd: float | None = None,
         attachments: list[str] | None = None,
         tools: list[str] | None = None,
+        attachment_ids: list[str] | None = None,
     ) -> None:
         """The market is about to start this job; its job_id arrives with job_split."""
         self._pending = (job_text, provider, budget_usd, list(attachments or []), tools)
+        self._pending_ids = list(attachment_ids or [])
 
     def observe(self, event: dict) -> None:
         job_id = event.get("job_id")
@@ -59,6 +62,7 @@ class SessionStore:
                     "budget_usd": budget,
                     "attachments": attached,
                     "tools": tool_servers,  # MCP servers allowed (None: all)
+                    "attachment_ids": getattr(self, "_pending_ids", []),  # so a re-run gets them too
                     "bids": {},          # agent -> bids actually placed
                     "rep_updates": [],   # every reputation change, in order
                     "status": "running",
@@ -91,6 +95,14 @@ class SessionStore:
                 self._update(job_id, status="error", finished_at=time.time())
         except OSError:
             pass  # saving history must never stop the market
+
+    def mark_stopped(self, job_id: str | None) -> None:
+        """A job cancelled by Stop (it never reached its final)."""
+        if job_id and _safe_id(job_id):
+            record = self.get(job_id)
+            if record is not None and record.get("status") == "running":
+                with contextlib.suppress(OSError):
+                    self._update(job_id, status="stopped", finished_at=time.time())
 
     def _path(self, job_id: str) -> Path:
         return self.directory / f"{job_id}.json"

@@ -735,3 +735,17 @@ b.top, i.top { background: var(--abyss-muted); }
   justify-self: end; padding: 3px 12px; color: var(--abyss-ink-text); background: var(--abyss-gold); border: 0;
   border-radius: 999px; cursor: pointer; font: 700 10px var(--font-mono);
 }
+
+/* ---- stop, queue, run again ---- */
+.stop-btn {
+  justify-self: start; margin-top: 8px; padding: 6px 12px; color: #fff; background: var(--abyss-bad);
+  border: 2px solid var(--abyss-ink); cursor: pointer; font-family: var(--font-pixel); font-size: 9px;
+}
+.stop-btn:disabled { opacity: 0.6; cursor: default; }
+.queued-row { display: flex; align-items: center; gap: 6px; padding: 5px 8px; font: 11px var(--font-mono); opacity: 0.85; }
+.queued-row span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.queued-row em { color: var(--abyss-text-dim); font-size: 9px; font-style: normal; }
+.queued-row button { padding: 0 6px; color: inherit; background: none; border: 1px solid currentColor; border-radius: 4px; cursor: pointer; }
+.session-dot.queued { background: var(--abyss-gold); }
+.run-again { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 4px 0 8px; }
+.run-again small { color: var(--abyss-text-dim); font: 10px var(--font-mono); }

@@ -3,7 +3,7 @@
 // be steered. The terminal chat (python -m abyss.chat) still works alongside.
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
-import { api, type Attachment, type Estimate, type McpServer, type Provider, type SessionRecord, type SessionSummary, type VendorStats } from "../api";
+import { api, type Attachment, type Estimate, type McpServer, type Provider, type QueueStatus, type SessionRecord, type SessionSummary, type VendorStats } from "../api";
 import type { AgentId, ClientMsg, TaskType } from "../contract";
 import { VENDOR, formatCents } from "../scene/model";
 import type { InteractId } from "../scene/world";
@@ -159,7 +159,6 @@ function NewSession({ state, send, providers }: Pick<GameDialogProps, "state" | 
   };
 
   if (!send) return <p className="rpg-hint">This is a replay, so new sessions can't start here.</p>;
-  if (state.jobActive) return <p className="rpg-hint">The crew is on the current session. Start a new one when it finishes.</p>;
   const budgetUsd = budget.trim() ? Number(budget) : null;
   const budgetOk = budgetUsd === null || (Number.isFinite(budgetUsd) && budgetUsd > 0 && budgetUsd <= 100);
   const start = () => {
@@ -172,6 +171,7 @@ function NewSession({ state, send, providers }: Pick<GameDialogProps, "state" | 
       ...(budgetUsd !== null ? { budget_usd: budgetUsd } : {}),
       ...(attached.length ? { attachments: attached.map((a) => a.id) } : {}),
       ...(toolsOff.length ? { tools: toolServers.map((s) => s.name).filter((n) => !toolsOff.includes(n)) } : {}),
+      ...(state.jobActive ? { queue: true } : {}),
     };
     if (send(message)) {
       setJob("");
@@ -311,14 +311,63 @@ function NewSession({ state, send, providers }: Pick<GameDialogProps, "state" | 
         <p className="rpg-hint">A hard cap: every AI call is sized to what's left, and the crew stops the moment the budget runs out.</p>
       )}
       <button type="submit" className="btn-primary" disabled={!job.trim() || !state.connected || !budgetOk}>
-        {state.connected ? "Start session" : "Connecting…"}
+        {!state.connected ? "Connecting…" : state.jobActive ? "Add to queue" : "Start session"}
       </button>
+      {state.jobActive && <p className="rpg-hint">The crew is busy, so this waits in line and starts when the current session ends.</p>}
       {refusal && <p className="form-error" role="alert">{refusal}</p>}
     </form>
   );
 }
 
-function PastSession({ id }: { id: string }) {
+/** Waiting sessions, polled while the Captain's panel is open. */
+function useQueue(): [QueueStatus | null, (id: string) => void] {
+  const [queue, setQueue] = useState<QueueStatus | null>(null);
+  useEffect(() => {
+    const load = () => api.queue().then(setQueue).catch(() => undefined);
+    void load();
+    const timer = window.setInterval(load, 2000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const remove = (id: string) => void api.dequeue(id).then(setQueue).catch(() => undefined);
+  return [queue, remove];
+}
+
+/** Send a saved session out again (queued if the crew is busy). */
+function RunAgain({ record, state, send }: { record: SessionRecord; state: MarketState; send?: GameDialogProps["send"] }) {
+  const [sent, setSent] = useState<"started" | "queued" | null>(null);
+  if (!send || !record.job_text) return null;
+  const run = () => {
+    const message: ClientMsg = {
+      type: "start_job",
+      job: record.job_text,
+      ...(record.provider ? { provider: record.provider } : {}),
+      ...(record.budget_usd != null ? { budget_usd: record.budget_usd } : {}),
+      ...(record.attachment_ids?.length ? { attachments: record.attachment_ids } : {}),
+      ...(record.tools ? { tools: record.tools } : {}),
+      ...(state.jobActive ? { queue: true } : {}),
+    };
+    if (send(message)) setSent(state.jobActive ? "queued" : "started");
+  };
+  return (
+    <div className="run-again">
+      <button type="button" className="chip" onClick={run} disabled={sent !== null || !state.connected}>
+        {sent === "queued" ? "Queued ✓" : sent === "started" ? "Started ✓" : state.jobActive ? "↻ Queue again" : "↻ Run again"}
+      </button>
+      <small>Same job, AI, budget, tools and files.</small>
+    </div>
+  );
+}
+
+/** Run again for the session that just ended (its saved settings). */
+function SavedRunAgain({ id, state, send }: { id: string; state: MarketState; send?: GameDialogProps["send"] }) {
+  const [record, setRecord] = useState<SessionRecord | null>(null);
+  useEffect(() => {
+    api.session(id).then(setRecord).catch(() => setRecord(null));
+  }, [id]);
+  return record ? <RunAgain record={record} state={state} send={send} /> : null;
+}
+
+function PastSession({ id, state, send }: { id: string; state: MarketState; send?: GameDialogProps["send"] }) {
   const [record, setRecord] = useState<SessionRecord | null | "error">(null);
   useEffect(() => {
     api.session(id).then(setRecord).catch(() => setRecord("error"));
@@ -328,6 +377,7 @@ function PastSession({ id }: { id: string }) {
   return (
     <>
       <p className="job-quote">"{record.job_text}"</p>
+      <RunAgain record={record} state={state} send={send} />
       {record.final ? <ResultView final={record.final} /> : <p className="rpg-hint">This session ended without a result ({record.status}).</p>}
     </>
   );
@@ -344,6 +394,15 @@ function MainAgentDialog({ state, onClose, send, providers, sessions }: GameDial
     lastJob.current = id;
   }, [current?.jobId]);
 
+  const [queue, removeQueued] = useQueue();
+  const [stopping, setStopping] = useState(false);
+  useEffect(() => {
+    if (!state.jobActive) setStopping(false);
+  }, [state.jobActive]);
+  const stop = () => {
+    if (!send || !window.confirm("Stop this session? Work in progress wraps up, and no new AI calls are made.")) return;
+    if (send({ type: "stop_job" })) setStopping(true);
+  };
   const past = (sessions ?? []).filter((s) => s.id !== current?.jobId);
   const view = pick === "new" || pick === current?.jobId || past.some((s) => s.id === pick) ? pick : "new";
   const subtitle =
@@ -368,9 +427,17 @@ function MainAgentDialog({ state, onClose, send, providers, sessions }: GameDial
             <span>{clip(current.jobText || "Current session")}</span>
           </button>
         )}
+        {(queue?.queue ?? []).map((q, i) => (
+          <div key={q.id} className="queued-row">
+            <i className="session-dot queued" />
+            <span>{clip(q.job)}</span>
+            <em>#{i + 1} in line</em>
+            <button type="button" aria-label="Remove from queue" onClick={() => removeQueued(q.id)}>×</button>
+          </div>
+        ))}
         {past.map((s) => (
           <button key={s.id} type="button" className={view === s.id ? "on" : ""} onClick={() => setPick(s.id)}>
-            <i className={`session-dot ${s.status === "ok" ? "done" : "failed"}`} />
+            <i className={`session-dot ${s.status === "ok" ? "done" : s.status === "stopped" ? "queued" : "failed"}`} />
             <span>{clip(s.job_text || s.filename || s.id)}</span>
             <em>{money(s.cost_usd)}{s.mean_grade != null ? ` · ${s.mean_grade}/10` : ""}</em>
           </button>
@@ -384,10 +451,21 @@ function MainAgentDialog({ state, onClose, send, providers, sessions }: GameDial
           <ul className="task-lines">{state.taskOrder.map((id) => <TaskRow key={id} task={state.tasks[id]} />)}</ul>
           <Notes state={state} target="job" label="Your notes for the crew" />
           {state.jobActive && <SteerBox state={state} send={send} target="job" label="Steer the whole session" />}
+          {state.jobActive && send && (
+            <button type="button" className="stop-btn" onClick={stop} disabled={stopping || queue?.stopping}>
+              {stopping || queue?.stopping ? "Stopping… finishing up" : "■ Stop session"}
+            </button>
+          )}
           {state.final && <ResultView final={state.final} />}
+          {state.final && !state.jobActive && current.jobText && (
+            <SavedRunAgain id={current.jobId} state={state} send={send} />
+          )}
         </>
       )}
-      {view !== "new" && view !== current?.jobId && <PastSession key={view} id={view} />}
+      {view !== "new" && view !== current?.jobId && <PastSession key={view} id={view} state={state} send={send} />}
+      {(queue?.dropped ?? []).slice(-1).map((d) => (
+        <p key={d.id} className="form-error">A queued session didn't start: {d.reason}</p>
+      ))}
     </Shell>
   );
 }
