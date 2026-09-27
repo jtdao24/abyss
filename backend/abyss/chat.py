@@ -57,6 +57,13 @@ class ChatState:
     waiting_for_mine: bool = False   # sent start_job, job_split not seen yet
     my_job_id: str | None = None
     tasks: dict[str, dict] = field(default_factory=dict)
+    stopped: set[str] = field(default_factory=set)  # job ids the user stopped
+    cut_off_said: set[str] = field(default_factory=set)  # jobs whose stop / budget line was printed
+
+
+# Stop and the budget cap end work on purpose: said calmly, not as failures.
+CUT_OFF = ("stopped by you", "budget reached")
+STOP_NOTE = "Stop:"
 
 
 def downloads_dir(override: str | None = None) -> Path:
@@ -118,7 +125,7 @@ def describe(event: dict, state: ChatState) -> str | None:
     if kind == "hello":
         cfg = d["config"]
         mode = "FAKE MODE — no real AI calls" if cfg["fake_llm"] else (
-            "TEST MODE — every agent runs on Haiku" if not cfg["real_models"] else "LIVE — real models")
+            "TEST MODE — every vendor on the budget model" if not cfg["real_models"] else "LIVE — real models")
         return dim(f"connected to the market · {mode}")
     if kind == "job_split":
         state.tasks = {t["task_id"]: t for t in d["tasks"]}
@@ -130,6 +137,8 @@ def describe(event: dict, state: ChatState) -> str | None:
     if kind == "bid":
         who = VENDOR[d["agent_id"]]
         if not d["ok"]:
+            if (d["error"] or "").startswith(CUT_OFF):
+                return None  # the task's own line says why
             standby = (d["error"] or "").startswith("standby")
             return dim(f"   {who} is on standby (backup only)" if standby else f"   {who} passed")
         cents = (d["predicted_cost_usd"] or 0) * 100
@@ -150,11 +159,26 @@ def describe(event: dict, state: ChatState) -> str | None:
         delta = d["new"] - d["old"]
         arrow = green("▲") if delta > 0 else red("▼") if delta < 0 else "="
         return dim(f"   {VENDOR[d['agent_id']]} {d['task_type']} reputation {d['old']:.3f} → {d['new']:.3f} ") + arrow
+    if kind == "steered" and d["note"].startswith(STOP_NOTE):
+        state.stopped.add(event["job_id"])
+        return yellow("   ■ Stopping: work already started finishes, no new AI calls start")
     if kind == "steered":
         who = "every vendor" if d["target"] == "job" else VENDOR[d["target"]]
         return yellow(f"   ✎ noted for {who}: \"{d['note']}\" (applies from their next piece of work)")
     if kind == "assembled":
         return bold(f"\n📦 Main agent is packaging everything into {d['filename']}")
+    if kind == "error" and d["message"].startswith(CUT_OFF):
+        message, job_id = d["message"], event["job_id"]
+        if message.startswith("stopped by you"):
+            state.stopped.add(job_id)
+        # Said once per job; each later task it cut off just gets a short line.
+        if job_id in state.cut_off_said:
+            draft = message.find("your file is")
+            if draft >= 0:
+                return yellow(f"   ■ Y{message[draft + 1:]}")
+            return yellow(f"   ■ {d['task_id'].upper()} skipped") if d.get("task_id") else None
+        state.cut_off_said.add(job_id)
+        return yellow(f"   ■ {message[0].upper()}{message[1:]}")
     if kind == "error":
         return red(f"   ⚠ {d['message']}")
     return None
@@ -180,11 +204,17 @@ def finish(event: dict, state: ChatState, folder: Path) -> str:
     path = save_deliverable(folder, d["filename"], d["deliverable"])
     shown = str(path).replace(str(Path.home()), "~", 1)
     grade = d["mean_grade"] if d["mean_grade"] is not None else "—"
+    stopped = event["job_id"] in state.stopped
+    headline = (
+        yellow(bold(f"\n■ Stopped. Your file has what was finished: {shown}"))
+        if stopped
+        else green(bold(f"\n✅ Done! Your file is ready: {shown}"))
+    )
     lines = [
-        green(bold(f"\n✅ Done! Your file is ready: {shown}")),
+        headline,
         f"   {d['summary']}" if d.get("summary") else None,
         dim(f"   mean grade {grade}/10 · total cost ${d['total_cost_usd']:.4f} · {d['duration_ms'] / 1000:.1f}s"
-            + ("" if d["status"] == "ok" else f" · status {d['status']}")),
+            + ("" if d["status"] == "ok" or stopped else f" · status {d['status']}")),
     ]
     return "\n".join(line for line in lines if line)
 

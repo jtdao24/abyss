@@ -27,6 +27,8 @@ const ease = (p: number) => 1 - (1 - p) * (1 - p);
 
 export class Director {
   private readonly tweens: Tween[] = [];
+  /** Jobs the user stopped: their final says STOPPED, not PARTIAL. */
+  private readonly stopped = new Set<string>();
   private readonly routes = {} as Record<AgentId, Point[]>;
   private readonly carrying = {} as Record<AgentId, Graphics>;
   /** What each task is, so a vendor's work animation matches its task type. */
@@ -122,8 +124,12 @@ export class Director {
         }
         if (ev.data.fatal) this.sendEveryoneHome();
         break;
+      case "steered":
+        if (ev.job_id && ev.data.note.startsWith("Stop:")) this.stopped.add(ev.job_id);
+        break;
       case "final":
-        this.floatText(ev.data.status === "ok" ? "JOB DONE!" : `JOB ${ev.data.status.toUpperCase()}`,
+        this.floatText(
+          ev.job_id && this.stopped.has(ev.job_id) ? "JOB STOPPED" : ev.data.status === "ok" ? "JOB DONE!" : `JOB ${ev.data.status.toUpperCase()}`,
           PALETTE.gold, WORLD.w / 2, WORLD.h / 2, 2200, 48);
         this.sendEveryoneHome();
         break;

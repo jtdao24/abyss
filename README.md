@@ -77,7 +77,7 @@ Click the Main Agent on the boat to open the Captain terminal. Type a job and pr
 | `/steer <1\|2\|3\|job> <note>` | steer one vendor, or the whole job, mid-run |
 | `/stop` (or the red **stop** button) | stop the running job: work in hand finishes, no new AI calls start |
 | `/queue`, `/unqueue <n>` | list queued jobs, remove one |
-| `/sessions`, `/open <n>`, `/rerun [n]` | past sessions; run one again with the same job, AI, budget, tools and files |
+| `/sessions`, `/open <n>`, `/rerun [n]` | past sessions; open one's file, or run it again with the same job, AI, budget, tools and files |
 | `/price <0-5>` | how much price matters when choosing a vendor (0 = quality only) |
 | `/budget <usd\|off>` | hard spending cap for your next job |
 | `/ai [name]` | pick the AI for your next job |
@@ -85,8 +85,10 @@ Click the Main Agent on the boat to open the Captain terminal. Type a job and pr
 | `/tools [on\|off <name>\|all]` | which tool servers the vendors may use |
 | `/examples`, `/example <n>` | sample jobs |
 | `/estimate` | what a typical job costs |
-| `/result`, `/save` | read or download the finished file |
+| `/result`, `/save` | open or download the finished file |
 | `/status`, `/reset`, `/clear`, `/exit` | what's running; reset every vendor's reputation; clear; close |
+
+When a job finishes, click **Open file** in the terminal (or **File** in the header) to read the result: Markdown is shown formatted, code and data files as plain text, with **Copy** and **Download**. If you stopped the job, the file has what was finished.
 
 There's also a plain terminal chat (`python start.py --chat`) with `/steer`, `/price`, `/reset` and `/status`. It shares the same market as the browser.
 

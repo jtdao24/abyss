@@ -58,6 +58,8 @@ def budget_token_cap(ledger: Ledger, model: str, system: str, user: str) -> int 
     input_cost = (len(system) + len(user)) / 4 * input_price / 1_000_000
     allowed = int((remaining - input_cost) * 1_000_000 / output_price) if output_price else 10**9
     if remaining <= 0 or allowed < MIN_BUDGET_TOKENS:
+        if getattr(ledger, "stopped", False):
+            raise BudgetExceeded(f"stopped by you: ${ledger.total_cost():.4f} spent, no new AI calls")
         raise BudgetExceeded(
             f"budget reached: ${ledger.total_cost():.4f} of ${ledger.budget_usd:.4f} spent"
         )

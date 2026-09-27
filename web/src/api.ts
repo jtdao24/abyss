@@ -47,6 +47,8 @@ export interface SessionRecord {
   tools?: string[] | null;
   attachment_ids?: string[];
   status: string;
+  /** The user pressed Stop (the final is still "partial" or "ok"). */
+  stopped?: boolean;
   started_at: number;
   stats: StatsData | null;
   final: FinalData | null;

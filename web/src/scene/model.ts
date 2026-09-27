@@ -149,8 +149,9 @@ export function sceneModel(state: MarketState): SceneModel {
       : "WAITING FOR A JOB";
 
   const total = state.final?.total_cost_usd ?? state.stats?.total_cost_usd ?? 0;
+  const stopped = state.steering.some((s) => s.jobId === state.currentJob?.jobId && s.target === "job" && s.note.startsWith("Stop:"));
   const finalBanner = state.final
-    ? `JOB ${state.final.status.toUpperCase()} - GRADE ${state.final.mean_grade ?? "-"} - $${state.final.total_cost_usd.toFixed(4)}`
+    ? `JOB ${stopped ? "STOPPED" : state.final.status.toUpperCase()} - GRADE ${state.final.mean_grade ?? "-"} - $${state.final.total_cost_usd.toFixed(4)}`
     : null;
 
   const tasksFinished =
