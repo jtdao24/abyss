@@ -456,9 +456,10 @@ export function CaptainTerminal({ state, onClose, send, providers = [], sessions
           e.preventDefault();
           if (input.trim()) (/^\/stop\b/.test(input.trim()) ? sfx.stop : sfx.submit)();
           pinned.current = true; // typing something takes you back to the newest line
-          run(input);
+          // Clear first: a command like /example puts new text on the prompt.
           setInput("");
           setHistoryAt(null);
+          run(input);
         }}
       >
         <span>you ›</span>
