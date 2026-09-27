@@ -513,3 +513,60 @@ th { color: #7fb7b6; }
 .rep-row polyline { fill: none; stroke-width: 2; }
 .rep-row .baseline { stroke: var(--abyss-parchment-edge); stroke-dasharray: 3 3; }
 .rep-row strong { font: 11px var(--font-mono); text-align: right; }
+
+/* ---- tools (MCP servers) drawer ---- */
+.mcp-panel a { color: var(--abyss-teal); }
+.chip.on { background: var(--abyss-gold); border-color: var(--abyss-gold-deep); }
+.chip.danger { color: #7a1d14; }
+.chip:disabled { opacity: 0.5; cursor: default; }
+.mcp-servers, .mcp-catalog, .mcp-tools, .mcp-activity { margin: 8px 0 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+.mcp-server { background: var(--abyss-bg1); border: 1px solid var(--abyss-line); border-radius: 6px; }
+.mcp-server-head {
+  display: flex; align-items: center; gap: 6px; width: 100%; padding: 7px 8px; color: var(--abyss-text);
+  background: none; border: 0; cursor: pointer; text-align: left; font: 11px var(--font-mono);
+}
+.mcp-server-head small { color: var(--abyss-text-dim); }
+.mcp-server-head em { margin-left: auto; color: var(--abyss-text-dim); font-style: normal; font-size: 10px; }
+.mcp-dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--abyss-text-dim); }
+.mcp-server.ready .mcp-dot { background: var(--abyss-good); box-shadow: 0 0 6px var(--abyss-good); }
+.mcp-server.starting .mcp-dot, .mcp-server.stopped .mcp-dot { background: var(--abyss-gold); animation: mcp-pulse 1s ease-in-out infinite; }
+.mcp-server.failed .mcp-dot { background: var(--abyss-bad); }
+.mcp-server.needs_keys .mcp-dot { background: var(--abyss-gold-deep); }
+.mcp-server.disabled { opacity: 0.6; }
+@keyframes mcp-pulse { 50% { opacity: 0.3; } }
+.mcp-server-body { display: grid; gap: 8px; padding: 0 8px 8px; }
+.mcp-target { overflow-wrap: anywhere; color: var(--abyss-text-dim); font: 10px var(--font-mono); }
+.mcp-tools { max-height: 180px; overflow-y: auto; gap: 2px; }
+.mcp-tools label { display: grid; grid-template-columns: auto auto 1fr; gap: 6px; align-items: baseline; font: 10px var(--font-mono); cursor: pointer; }
+.mcp-tools span { overflow: hidden; color: var(--abyss-text-dim); text-overflow: ellipsis; white-space: nowrap; }
+.mcp-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.mcp-keys { display: grid; gap: 6px; }
+.mcp-field { display: grid; gap: 3px; font: 10px var(--font-mono); color: var(--abyss-text-soft); }
+.mcp-field span { display: flex; justify-content: space-between; gap: 6px; }
+.mcp-field input, .mcp-field textarea {
+  padding: 5px 6px; color: var(--abyss-text); background: var(--abyss-bg0); border: 1px solid var(--abyss-line2);
+  border-radius: 4px; font: 11px var(--font-mono);
+}
+.mcp-search { width: 100%; margin-bottom: 8px; box-sizing: border-box; }
+.mcp-catalog { grid-template-columns: 1fr 1fr; }
+.mcp-catalog-card {
+  display: grid; align-content: start; gap: 6px; padding: 8px; background: var(--abyss-bg1);
+  border: 1px solid var(--abyss-line); border-radius: 6px; font: 10px/1.4 var(--font-mono);
+}
+.mcp-catalog-card.added { border-color: var(--abyss-good); }
+.mcp-catalog-card:has(form) { grid-column: 1 / -1; }
+.mcp-catalog-card p { margin: 0; color: var(--abyss-text-dim); }
+.mcp-catalog-top { display: flex; justify-content: space-between; gap: 4px; }
+.mcp-catalog-top strong { color: var(--abyss-text); font-size: 11px; }
+.mcp-catalog-top small { color: var(--abyss-teal); }
+.mcp-added { color: var(--abyss-good-soft); font-style: normal; }
+.mcp-catalog-card > .chip { justify-self: start; }
+.mcp-custom-wrap { margin-top: 10px; color: var(--abyss-text-soft); font: 11px var(--font-mono); }
+.mcp-custom-wrap summary { cursor: pointer; }
+.mcp-custom { margin-top: 8px; }
+.mcp-activity { gap: 2px; font: 10px var(--font-mono); }
+.mcp-activity li { display: flex; align-items: center; gap: 4px; padding: 3px 0; border-top: 1px solid var(--abyss-line); }
+.mcp-activity li span { margin-left: auto; color: var(--abyss-text-dim); }
+.mcp-activity li.bad span { color: var(--abyss-bad); }
+.app-shell:not(.ledger-hidden):has(.mcp-panel) { grid-template-columns: minmax(480px, 1fr) 380px; }
+@media (max-width: 900px) { .mcp-catalog { grid-template-columns: 1fr; } }

@@ -12,7 +12,7 @@ from typing import Any, Literal
 
 from . import config, prompts
 from .ledger import Ledger, cost_usd
-from .tools import ToolHub
+from .tools import CALLER, ToolHub
 
 
 logger = logging.getLogger(__name__)
@@ -147,9 +147,12 @@ class LLM:
         await self._tools.start()
         return bool(self._tools.definitions())
 
-    async def _run_tools(self, calls: list[tuple[str, str, dict]]) -> list[tuple[str, str, bool]]:
+    async def _run_tools(
+        self, calls: list[tuple[str, str, dict]], caller: tuple[str | None, str | None] = (None, None)
+    ) -> list[tuple[str, str, bool]]:
         """(id, name, arguments) -> (id, text, is_error), run concurrently."""
         async def one(call_id: str, name: str, arguments: dict) -> tuple[str, str, bool]:
+            CALLER.set(caller)
             logger.info("tool %s %s", name, json.dumps(arguments)[:200])
             text, is_error = await self._tools.call(name, arguments)
             return call_id, text, is_error
@@ -236,7 +239,7 @@ class LLM:
                 break
             tools_ran = True
             parsed = [(call.id, call.function.name, _json_args(call.function.arguments)) for call in calls]
-            results = await self._run_tools(parsed)
+            results = await self._run_tools(parsed, (agent_id, task_id))
             messages.append({
                 "role": "assistant",
                 "content": message.content,
@@ -445,12 +448,11 @@ class LLM:
         )
 
 
-def _load_tools() -> ToolHub | None:
-    try:
-        return ToolHub.from_config()
-    except (OSError, ValueError) as exc:  # a broken mcp.json must not stop the market
-        logger.warning("ignoring MCP config: %s", exc)
-        return None
+def _load_tools():
+    """The process-wide MCP servers (mcp.json), shared by every LLM."""
+    from .tools import shared
+
+    return shared()
 
 
 def _tool_error(message: str, tools_ran: bool) -> LLMError:

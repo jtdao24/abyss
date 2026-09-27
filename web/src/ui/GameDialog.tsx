@@ -3,7 +3,7 @@
 // be steered. The terminal chat (python -m abyss.chat) still works alongside.
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
-import { api, type Attachment, type Estimate, type Provider, type SessionRecord, type SessionSummary, type VendorStats } from "../api";
+import { api, type Attachment, type Estimate, type McpServer, type Provider, type SessionRecord, type SessionSummary, type VendorStats } from "../api";
 import type { AgentId, ClientMsg, TaskType } from "../contract";
 import { VENDOR, formatCents } from "../scene/model";
 import type { InteractId } from "../scene/world";
@@ -124,6 +124,8 @@ function NewSession({ state, send, providers }: Pick<GameDialogProps, "state" | 
   const [link, setLink] = useState("");
   const [attaching, setAttaching] = useState(false);
   const [attachError, setAttachError] = useState<string | null>(null);
+  const [toolServers, setToolServers] = useState<McpServer[]>([]);
+  const [toolsOff, setToolsOff] = useState<string[]>([]); // servers left out of this session
   const fileInput = useRef<HTMLInputElement | null>(null);
   const refusal = useLastRefusal(state);
   const choices = providers ?? [];
@@ -137,6 +139,11 @@ function NewSession({ state, send, providers }: Pick<GameDialogProps, "state" | 
       live = false;
     };
   }, [provider]);
+
+  // Connected MCP servers the vendors may use (all on unless unticked).
+  useEffect(() => {
+    api.mcp().then((v) => setToolServers(v.servers.filter((s) => s.state === "ready"))).catch(() => setToolServers([]));
+  }, []);
 
   const attach = async (make: () => Promise<Attachment>) => {
     setAttaching(true);
@@ -164,6 +171,7 @@ function NewSession({ state, send, providers }: Pick<GameDialogProps, "state" | 
       ...(provider && choices.length > 1 ? { provider } : {}),
       ...(budgetUsd !== null ? { budget_usd: budgetUsd } : {}),
       ...(attached.length ? { attachments: attached.map((a) => a.id) } : {}),
+      ...(toolsOff.length ? { tools: toolServers.map((s) => s.name).filter((n) => !toolsOff.includes(n)) } : {}),
     };
     if (send(message)) {
       setJob("");
@@ -249,6 +257,27 @@ function NewSession({ state, send, providers }: Pick<GameDialogProps, "state" | 
             </li>
           ))}
         </ul>
+      )}
+      {toolServers.length > 0 && (
+        <div className="template-row" aria-label="Tools the vendors may use">
+          <span className="rpg-hint">Tools:</span>
+          {toolServers.map((s) => {
+            const on = !toolsOff.includes(s.name);
+            return (
+              <button
+                key={s.name}
+                type="button"
+                className={`chip ${on ? "on" : ""}`}
+                aria-pressed={on}
+                title={`${s.tools.length} tools`}
+                onClick={() => setToolsOff((off) => (on ? [...off, s.name] : off.filter((n) => n !== s.name)))}
+              >
+                {on ? "✓ " : ""}
+                {s.label}
+              </button>
+            );
+          })}
+        </div>
       )}
       {choices.length > 1 && (
         <div className="segmented" role="radiogroup" aria-label="AI for this session">
