@@ -31,7 +31,16 @@ from .sessions import SessionStore, usage_summary, vendor_stats
 
 
 logger = logging.getLogger(__name__)
-app = FastAPI()
+
+
+@contextlib.asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    yield
+    with contextlib.suppress(Exception):
+        await tools.shared().close()
+
+
+app = FastAPI(lifespan=_lifespan)
 # The market runs on this computer only. Checking the Host header stops DNS
 # rebinding (another site pointing its own name at 127.0.0.1 to read /api/*).
 # "testserver" is Starlette's TestClient.
@@ -42,6 +51,8 @@ app.add_middleware(TrustedHostMiddleware, allowed_hosts=[*LOCAL_HOSTS, "testserv
 def _local_origin(origin: str | None) -> bool:
     """A browser page on this computer, or no Origin at all (a script, the terminal chat)."""
     return not origin or urlparse(origin).hostname in LOCAL_HOSTS
+
+
 reputation = ReputationStore(config.rep_path())
 llm = LLM()
 
@@ -440,12 +451,6 @@ async def api_mcp_reload(request: Request) -> dict:
     await _json_body(request)
     await _apply_tool_changes()
     return _tools_view()
-
-
-@app.on_event("shutdown")
-async def _close_tools() -> None:
-    with contextlib.suppress(Exception):
-        await tools.shared().close()
 
 
 @app.get("/api/estimate")

@@ -253,7 +253,8 @@ The built web app (`web/dist`) is served at `/`.
 ## 9. Repo layout and ownership
 
 ```
-SPEC.md TASKS.md README.md .gitignore .env.example mcp.example.json
+SPEC.md README.md CONTRIBUTING.md LICENSE .gitignore .env.example mcp.example.json
+docs/TASKS.md                                          (original build plan, historical)
 start.py start.cmd start.sh                            (one-command launcher)
 .github/workflows/ci.yml                               (pytest, vitest, web build)
 fixtures/     make_fake_run.py, fake_run.json         (orchestrator-owned)

@@ -1,5 +1,7 @@
 # Abyss
 
+![Abyss: AI agents bid on your task in a pixel-art seaside market](art/thumbnail/thumbnail.png)
+
 A pixel-art seaside market where AI agents bid on work.
 
 You give the **main agent** a job, such as "research X and write a 200-word brief". It splits the job into typed subtasks (`research`, `writing`, `checking`). For each task, three **vendors** bid a predicted cost and a promised quality. The best score wins and does the work. A **blind reviewer** then grades it. Each vendor's reputation moves toward what it actually delivered, so overpromisers get discounted over time. At the end, the main agent packages everything into a file and saves it to your Downloads folder.
@@ -141,6 +143,7 @@ fixtures/        canonical recorded run used by tests and replay
 experiments/     experiment jobs and results
 runs/            your local ledger, reputation, sessions, limits, logs (gitignored)
 .github/         CI workflow
+docs/            original build plan (historical)
 ```
 
 ## License
