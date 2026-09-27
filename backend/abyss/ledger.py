@@ -6,6 +6,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Literal
 
+from . import config
 from .config import AGENTS, PRICES
 
 
@@ -20,7 +21,9 @@ def cost_usd(
     cache_read: int = 0,
     cache_write: int = 0,
 ) -> float:
-    input_price, output_price = PRICES[model]
+    if model in config.TIERS:  # a tier: price it at the default AI's model for it
+        model = config.tier_model(model)
+    input_price, output_price = PRICES.get(model, config.FALLBACK_PRICE)
     cost = (
         input_tokens * input_price
         + output_tokens * output_price

@@ -13,7 +13,9 @@ import { GameDialog } from "./ui/GameDialog";
 
 const params = new URLSearchParams(window.location.search);
 const SOURCE = params.get("source") === "fixture" ? "fixture" : "ws"; // live by default; ?source=fixture replays a recording
-const WS_URL = import.meta.env.VITE_WS_URL ?? "ws://localhost:8000/ws";
+// Same origin as the page: the backend serves the built site on :8000, and
+// `npm run dev` proxies /ws to it.
+const WS_URL = import.meta.env.VITE_WS_URL ?? `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/ws`;
 const parsedSpeed = Number(params.get("speed") || "1");
 const SPEED = SOURCE === "fixture" && Number.isFinite(parsedSpeed) && parsedSpeed > 0 ? parsedSpeed : 1;
 
@@ -25,13 +27,23 @@ function createSource(): EventSource {
   return new FixtureSource(`/fixtures/${encodeURIComponent(file)}.json`, SPEED);
 }
 
+/** Which AI the market runs on, read from the stalls' models in `hello`. */
+function aiName(state: MarketState): string {
+  const models = Object.values(state.agents).map((agent) => agent?.model ?? "");
+  if (models.some((m) => m.startsWith("muse"))) return "MUSE";
+  if (models.some((m) => m.startsWith("gpt") || /^o\d/.test(m))) return "OPENAI";
+  return "";
+}
+
 function modeBadge(state: MarketState): { label: string; tone: string } {
   if (SOURCE === "fixture") return { label: "REPLAY", tone: "replay" };
   if (!state.connected) return { label: "OFFLINE", tone: "offline" };
   if (!state.config) return { label: "CONNECTING", tone: "offline" };
-  if (state.config.fake_llm) return { label: "FAKE LLM", tone: "fake" };
-  if (!state.config.real_models) return { label: "HAIKU TEST MODE", tone: "test" };
-  return { label: "LIVE", tone: "live" };
+  const ai = aiName(state);
+  const prefix = ai ? `${ai} · ` : "";
+  if (state.config.fake_llm) return { label: `${prefix}FAKE`, tone: "fake" };
+  if (!state.config.real_models) return { label: `${prefix}TEST MODE`, tone: "test" };
+  return { label: `${prefix}LIVE`, tone: "live" };
 }
 
 export default function App() {

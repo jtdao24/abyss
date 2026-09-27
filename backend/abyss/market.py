@@ -353,7 +353,11 @@ async def _run_auction(
 
         raw, usage = result
         tokens, quality, pitch = clamp_bid(raw)
-        price = predicted_cost(agent.model, estimated_input, tokens)
+        # Price the bid at the model this stall runs on for the session's AI
+        # (e.g. GPT-5 for VENDOR 1 on OpenAI, Muse Spark on Meta).
+        price = predicted_cost(
+            config.tier_model(agent.model, getattr(llm, "provider_name", None)), estimated_input, tokens
+        )
         reputation = rep.get(agent.agent_id, task.type)
         score = score_bid(quality, reputation, price, price_weight)
         bid = ScoredBid(
@@ -426,8 +430,9 @@ async def _work_with_retry(
     for attempt in range(2):
         try:
             return await do_work(llm, ledger, agent, job_text, task, dep_outputs, notes)
-        except LLMError:
-            if attempt == 1:
+        except LLMError as exc:
+            # A tool may already have posted or edited something: never do that twice.
+            if attempt == 1 or exc.tools_ran:
                 raise
     raise AssertionError("unreachable")
 

@@ -11,21 +11,27 @@ Abyss is a marketplace where AI agents bid on work. An orchestrator LLM splits a
 
 ### 1.1 Agents (frozen ids; array order = stall order left→right = tie-break order)
 
-| agent_id | display_name | model (nominal) | color |
-|---|---|---|---|
-| `haiku` | Haiku 4.5 | `claude-haiku-4-5` | `#4fb3a9` |
-| `sonnet` | Sonnet 5 | `claude-sonnet-5` | `#e8a33d` |
-| `opus` | Opus 5 | `claude-opus-5` | `#8e6cc9` |
+Abyss runs on **OpenAI** or **Meta Muse Spark** (`ABYSS_PROVIDER`, or picked per session). Each stall has a tier; the AI serves each tier with a real model:
 
-Non-agent roles: **orchestrator** `claude-sonnet-5`, **reviewer** `claude-sonnet-5`. These are configurable and are not agents: they never bid and have no reputation.
+| agent_id | stall | tier | OpenAI | Meta | color |
+|---|---|---|---|---|---|
+| `haiku` | VENDOR 3 | `budget` | `gpt-5-mini` | `muse-spark-1.3` | `#4fb3a9` |
+| `sonnet` | VENDOR 2 | `standard` | `gpt-5` | `muse-spark-1.3` | `#e8a33d` |
+| `opus` | VENDOR 1 | `premium` | `gpt-5` | `muse-spark-1.3` | `#8e6cc9` |
+
+The agent ids are frozen contract ids (they don't name models). `hello.agents[].display_name` and `.model` carry the served model for the default AI (e.g. "GPT-5 mini", `gpt-5-mini`). Tier models are overridable: `ABYSS_OPENAI_CHEAP` / `_MID` / `_TOP`, `ABYSS_META_CHEAP` / `_MID` / `_TOP`.
+
+Non-agent roles: **orchestrator** and **reviewer** both use the `standard` tier. They are not agents: they never bid and have no reputation.
 
 ### 1.2 Prices (USD per 1M tokens)
 
-| model | input | output | supports `effort` |
-|---|---|---|---|
-| `claude-haiku-4-5` | 1.00 | 5.00 | no (sending it errors) |
-| `claude-sonnet-5` | 2.00 | 10.00 | yes |
-| `claude-opus-5` | 5.00 | 25.00 | yes |
+| model | input | output |
+|---|---|---|
+| `gpt-5-mini` | 0.25 | 2.00 |
+| `gpt-5` | 1.25 | 10.00 |
+| `muse-spark-1.3` | 1.25 | 4.25 |
+
+More models (gpt-5-nano, gpt-4.1*, gpt-4o*, the Muse contributor tier) are priced in `config.py`; an unknown model is priced at 2.00 / 10.00. Reasoning effort (`reasoning_effort`) is sent to both AIs.
 
 Cache reads cost 0.1× the input price and cache writes cost 1.25× the input price. We don't plan to use caching, but the ledger records both fields anyway.
 
@@ -41,21 +47,21 @@ Cache reads cost 0.1× the input price and cache writes cost 1.25× the input pr
 | `REP_ALPHA` | `0.3` | — |
 | `REP_MIN`, `REP_MAX` | `0.0`, `2.0` | — |
 | `MAX_TASKS` | `5` (min 2) | — |
-| `WORK_EFFORT` | `"medium"` (only sent to models that support effort) | — |
+| `WORK_EFFORT` | `"medium"` | — |
 | `BID_EFFORT`, `REVIEW_EFFORT`, `SPLIT_EFFORT` | `"low"` | — |
 
 ### 1.5 Run modes (cost safety)
 
 | env | effect |
 |---|---|
-| *(default)* | **Haiku test mode.** Every LLM call is sent to `claude-haiku-4-5`, whatever role or agent makes it. |
-| `ABYSS_REAL_MODELS=1` | Calls go to each role's real model. Required for demos and the experiment. |
-| `ABYSS_FAKE_LLM=1` | No network. A deterministic fake returns canned outputs and synthetic usage. Used for tests, WS work and frontend dev. |
+| *(default)* | **Real models.** Each tier runs on its own model for the session's AI (OpenAI or Meta). |
+| `ABYSS_TEST_MODE=1` (or `ABYSS_REAL_MODELS=0`) | **Test mode.** Every call runs on the `budget` model, whatever role or agent makes it. |
+| `ABYSS_FAKE_LLM=1` | No network. A deterministic fake returns canned outputs and synthetic usage, priced as the provider's models. **Tests only**; the app always makes real AI calls. |
 | `ABYSS_FAKE_DELAY` | Seconds per fake call (default `0.3`). |
 | `ABYSS_LEDGER_PATH` | Append-only JSONL ledger (default `runs/ledger.jsonl`). |
 | `ABYSS_REP_PATH` | Reputation persistence file (default `runs/reputation.json`). |
 
-In Haiku test mode:
+In test mode:
 - The **ledger** prices each call at the model that was **actually called** (the truth).
 - The **auction** prices bids at the agent's **nominal** model (§3), so market dynamics look the same as in a real run.
 - `usage.model` always reports the model that was actually called.
@@ -105,14 +111,14 @@ cost_usd(model, in, out, cache_read=0, cache_write=0)
 
 ## 5. Ledger
 
-One entry per LLM call, **including calls that fail**. `backend/abyss/llm.py` is the **only** module that imports `anthropic`, and it writes the ledger entry for every call itself. No other code path may call a model.
+One entry per LLM call, **including calls that fail**. `backend/abyss/llm.py` is the **only** module that calls a model (through the OpenAI SDK, which also serves Meta's OpenAI-compatible API), and it writes the ledger entry for every call itself. No other code path may call a model.
 
 ```json
 {
   "id": "c_0001", "ts": 1759000000.123, "job_id": "j_7f3a91c2",
   "task_id": "t1" | null, "agent_id": "haiku" | null,
   "purpose": "split" | "bid" | "work" | "review" | "assemble",
-  "model": "claude-haiku-4-5",
+  "model": "gpt-5-mini",
   "input_tokens": 350, "output_tokens": 60,
   "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0,
   "cost_usd": 0.00065, "ok": true, "stop_reason": "end_turn", "error": null,

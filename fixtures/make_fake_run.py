@@ -11,23 +11,22 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-PRICES = {  # USD per 1M tokens: (input, output)
-    "claude-haiku-4-5": (1.00, 5.00),
-    "claude-sonnet-5": (2.00, 10.00),
-    "claude-opus-5": (5.00, 25.00),
+PRICES = {  # USD per 1M tokens: (input, output) — OpenAI, the default AI
+    "gpt-5-mini": (0.25, 2.00),
+    "gpt-5": (1.25, 10.00),
 }
 AGENTS = [
-    {"agent_id": "haiku", "display_name": "Haiku 4.5", "model": "claude-haiku-4-5", "color": "#4fb3a9"},
-    {"agent_id": "sonnet", "display_name": "Sonnet 5", "model": "claude-sonnet-5", "color": "#e8a33d"},
-    {"agent_id": "opus", "display_name": "Opus 5", "model": "claude-opus-5", "color": "#8e6cc9"},
+    {"agent_id": "haiku", "display_name": "GPT-5 mini", "model": "gpt-5-mini", "color": "#4fb3a9"},
+    {"agent_id": "sonnet", "display_name": "GPT-5", "model": "gpt-5", "color": "#e8a33d"},
+    {"agent_id": "opus", "display_name": "GPT-5", "model": "gpt-5", "color": "#8e6cc9"},
 ]
 AGENT_MODEL = {a["agent_id"]: a["model"] for a in AGENTS}
 TASK_TYPES = ["research", "writing", "checking"]
 PRICE_WEIGHT = 1.0
 REP_INIT = 1.0
 REP_ALPHA = 0.3
-ORCH_MODEL = "claude-sonnet-5"
-REVIEW_MODEL = "claude-sonnet-5"
+ORCH_MODEL = "gpt-5"
+REVIEW_MODEL = "gpt-5"
 JOB_ID = "j_7f3a91c2"
 JOB_TEXT = (
     "Write a short explainer (under 150 words) on why most coasts get two "
@@ -110,7 +109,8 @@ TASKS = [
         "depends_on": [],
         "est_input_tokens": 180,
         "bids": {
-            "haiku": dict(pred=400, q=8, pitch="Fast, cheap, and I know my tides.", u=(350, 60, 1200)),
+            # Promises opus-level quality at a fraction of the price: wins, then grades 6 (overpromised).
+            "haiku": dict(pred=400, q=9, pitch="Fast, cheap, and I know my tides.", u=(350, 60, 1200)),
             "sonnet": dict(pred=500, q=8, pitch="Balanced research, sources in mind.", u=(350, 140, 1900)),
             "opus": dict(pred=600, q=9, pitch="Deep, precise physics. No hand-waving.", u=(350, 180, 2500)),
         },

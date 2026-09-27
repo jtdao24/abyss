@@ -5,7 +5,7 @@ from copy import deepcopy
 import pytest
 
 from abyss.agents import build_work_prompt, do_work, est_input_tokens, request_bid
-from abyss.config import AGENTS
+from abyss.config import AGENTS, tier_model
 from abyss.ledger import Ledger
 from abyss.llm import LLM, LLMError, LLMResult
 from abyss.orchestrator import TaskSpec, split_job
@@ -27,7 +27,7 @@ def result(data: dict | None, text: str = "text") -> LLMResult:
         text=text,
         data=data,
         usage={
-            "model": "claude-haiku-4-5",
+            "model": "gpt-5-mini",
             "input_tokens": 10,
             "output_tokens": 5,
             "cost_usd": 0.000035,
@@ -46,7 +46,7 @@ async def test_fake_role_shapes(monkeypatch) -> None:
     tasks, split_usage = await split_job(llm, ledger, "Explain a fact, then check it.")
     assert [task.type for task in tasks] == ["research", "writing", "checking"]
     assert tasks[1].depends_on == ["t1"]
-    assert split_usage["model"] == "claude-sonnet-5"
+    assert split_usage["model"] == "gpt-5"
 
     raw_bid, bid_usage = await request_bid(
         llm,
@@ -62,20 +62,20 @@ async def test_fake_role_shapes(monkeypatch) -> None:
         "promised_quality",
         "pitch",
     }
-    assert bid_usage["model"] == AGENTS[0].model
+    assert bid_usage["model"] == tier_model(AGENTS[0].model)  # the real model that answered
 
     output, work_usage = await do_work(
         llm, ledger, AGENTS[0], "Explain a fact.", tasks[0], {}
     )
     assert "Find the accurate facts and caveats needed for" in output
-    assert work_usage["model"] == AGENTS[0].model
+    assert work_usage["model"] == tier_model(AGENTS[0].model)
 
     grade, rationale, review_usage = await review(
         llm, ledger, "Explain a fact.", tasks[0], {}, output
     )
     assert 1 <= grade <= 10
     assert rationale
-    assert review_usage["model"] == "claude-sonnet-5"
+    assert review_usage["model"] == "gpt-5"
 
 
 @pytest.mark.asyncio

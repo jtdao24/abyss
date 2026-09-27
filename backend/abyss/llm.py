@@ -4,23 +4,25 @@ import argparse
 import asyncio
 import hashlib
 import json
+import logging
 import re
 import time
 from dataclasses import dataclass
 from typing import Any, Literal
 
-import anthropic
-
-from . import config
+from . import config, prompts
 from .ledger import Ledger, cost_usd
+from .tools import ToolHub
 
 
+logger = logging.getLogger(__name__)
 Purpose = Literal["split", "bid", "work", "review", "assemble"]
 NETWORK_TIMEOUT_SECONDS = 120.0
+# Fake mode (tests only): extra "thinking" tokens per tier, like a real run.
 THINKING_PAD = {
-    "claude-haiku-4-5": 0,
-    "claude-sonnet-5": 150,
-    "claude-opus-5": 300,
+    "budget": 0,
+    "standard": 150,
+    "premium": 300,
 }
 
 
@@ -33,13 +35,25 @@ class LLMResult:
 
 
 class LLMError(Exception):
-    pass
+    # True once an MCP tool ran: the work may already have posted somewhere,
+    # so it must not be retried.
+    tools_ran: bool = False
 
 
 class LLM:
-    def __init__(self, client: Any | None = None) -> None:
+    def __init__(
+        self, client: Any | None = None, provider: str | None = None, tools: ToolHub | None = None
+    ) -> None:
         self._fake = config.fake_llm()
         self._client = client
+        self._provider = provider  # None follows ABYSS_PROVIDER
+        # MCP tools (mcp.json) for work calls; fake mode never touches the network.
+        self._tools = tools if tools is not None or self._fake else _load_tools()
+
+    @property
+    def provider_name(self) -> str:
+        """The AI this LLM calls: "openai" or "meta" (Muse Spark)."""
+        return self._provider or config.provider()
 
     async def call(
         self,
@@ -67,189 +81,204 @@ class LLM:
                 agent_id=agent_id,
             )
 
-        model = config.resolve_model(nominal_model)
-        started = time.monotonic()
-        client = self._get_client()
-        request = self._request(
-            model=model,
+        provider_name = self.provider_name
+        if purpose == "work" and await self._tools_ready():
+            return await self._openai_tool_work(
+                provider_name=provider_name,
+                ledger=ledger,
+                nominal_model=nominal_model,
+                system=system + prompts.WORK_TOOLS,
+                user=user,
+                max_tokens=max_tokens,
+                effort=effort,
+                task_id=task_id,
+                agent_id=agent_id,
+            )
+        return await self._openai_call(
+            provider_name=provider_name,
+            ledger=ledger,
+            purpose=purpose,
+            nominal_model=nominal_model,
             system=system,
             user=user,
             max_tokens=max_tokens,
             effort=effort,
             schema=schema,
-        )
-
-        try:
-            response = await self._create(client, request)
-        except anthropic.APIStatusError as exc:
-            if schema is None or model != "claude-haiku-4-5" or exc.status_code != 400:
-                self._record_error(
-                    ledger, purpose, model, task_id, agent_id, started, str(exc)
-                )
-                raise LLMError(str(exc)) from exc
-            fallback = self._fallback_request(request, system, schema)
-            try:
-                response = await self._create(client, fallback)
-            except (
-                anthropic.APIStatusError,
-                anthropic.APIConnectionError,
-                asyncio.TimeoutError,
-            ) as fallback_exc:
-                self._record_error(
-                    ledger,
-                    purpose,
-                    model,
-                    task_id,
-                    agent_id,
-                    started,
-                    str(fallback_exc),
-                )
-                raise LLMError(str(fallback_exc)) from fallback_exc
-        except (anthropic.APIConnectionError, asyncio.TimeoutError) as exc:
-            self._record_error(
-                ledger, purpose, model, task_id, agent_id, started, str(exc)
-            )
-            raise LLMError(str(exc)) from exc
-
-        return self._result_from_response(
-            ledger=ledger,
-            purpose=purpose,
-            model=model,
-            response=response,
-            schema=schema,
             task_id=task_id,
             agent_id=agent_id,
-            started=started,
         )
 
-    def _get_client(self) -> Any:
-        if self._client is None:
-            self._client = anthropic.AsyncAnthropic(timeout=NETWORK_TIMEOUT_SECONDS)
-        return self._client
+    # ------------------------------------------------------------ MCP tool work
+    async def _tools_ready(self) -> bool:
+        if self._tools is None:
+            return False
+        await self._tools.start()
+        return bool(self._tools.definitions())
 
-    async def _create(self, client: Any, request: dict[str, Any]) -> Any:
-        return await asyncio.wait_for(
-            client.messages.create(**request), timeout=NETWORK_TIMEOUT_SECONDS
-        )
+    async def _run_tools(self, calls: list[tuple[str, str, dict]]) -> list[tuple[str, str, bool]]:
+        """(id, name, arguments) -> (id, text, is_error), run concurrently."""
+        async def one(call_id: str, name: str, arguments: dict) -> tuple[str, str, bool]:
+            logger.info("tool %s %s", name, json.dumps(arguments)[:200])
+            text, is_error = await self._tools.call(name, arguments)
+            return call_id, text, is_error
 
-    @staticmethod
-    def _request(
+        return list(await asyncio.gather(*(one(*call) for call in calls)))
+
+    async def _openai_tool_work(
+        self,
         *,
-        model: str,
+        provider_name: str,
+        ledger: Ledger,
+        nominal_model: str,
+        system: str,
+        user: str,
+        max_tokens: int,
+        effort: str | None,
+        task_id: str | None,
+        agent_id: str | None,
+    ) -> LLMResult:
+        import openai
+
+        model = config.served_model(provider_name, nominal_model)
+        if self._client is None:
+            if provider_name == "meta":
+                self._client = openai.AsyncOpenAI(
+                    base_url=config.META_BASE_URL, api_key=config.meta_api_key(), timeout=NETWORK_TIMEOUT_SECONDS
+                )
+            else:
+                self._client = openai.AsyncOpenAI(timeout=NETWORK_TIMEOUT_SECONDS)
+        request = _openai_request(
+            provider_name=provider_name, model=model, system=system, user=user,
+            max_tokens=max_tokens, effort=effort, schema=None,
+        )
+        request["tools"] = [
+            {"type": "function", "function": {
+                "name": tool["name"], "description": tool["description"], "parameters": tool["input_schema"],
+            }}
+            for tool in self._tools.definitions()
+        ]
+        messages = request["messages"]
+        rounds: list[LLMResult] = []
+        tools_ran = False
+        for round_no in range(config.MAX_TOOL_ROUNDS + 1):
+            if round_no == config.MAX_TOOL_ROUNDS:
+                request["tool_choice"] = "none"
+            started = time.monotonic()
+            try:
+                response = await asyncio.wait_for(
+                    self._client.chat.completions.create(**request), timeout=NETWORK_TIMEOUT_SECONDS
+                )
+            except (openai.APIStatusError, openai.APIConnectionError, asyncio.TimeoutError) as exc:
+                self._record_error(ledger, "work", model, task_id, agent_id, started, str(exc))
+                raise _tool_error(str(exc), tools_ran) from exc
+            choice = response.choices[0]
+            message = choice.message
+            stop_reason = OPENAI_STOP_REASONS.get(choice.finish_reason, choice.finish_reason)
+            usage_values = _openai_usage_values(response)
+            duration_ms = _duration_ms(started)
+            price = cost_usd(
+                model, usage_values["input_tokens"], usage_values["output_tokens"], usage_values["cache_read_input_tokens"]
+            )
+            calls = list(getattr(message, "tool_calls", None) or [])
+            refused = getattr(message, "refusal", None) or choice.finish_reason == "content_filter"
+            error = "model refused the request" if refused else None
+            if error is None and not calls and not (message.content or "").strip():
+                error = f"empty response (finish_reason={choice.finish_reason})"
+            self._record(ledger, "work", model, task_id, agent_id, usage_values, price, duration_ms,
+                         error is None, stop_reason, error)
+            if error is not None:
+                raise _tool_error(error, tools_ran)
+            rounds.append(LLMResult(
+                text=message.content or "", data=None, stop_reason=stop_reason,
+                usage={"model": model, "input_tokens": usage_values["input_tokens"],
+                       "output_tokens": usage_values["output_tokens"], "cost_usd": price,
+                       "duration_ms": duration_ms},
+            ))
+            if not calls:
+                break
+            tools_ran = True
+            parsed = [(call.id, call.function.name, _json_args(call.function.arguments)) for call in calls]
+            results = await self._run_tools(parsed)
+            messages.append({
+                "role": "assistant",
+                "content": message.content,
+                "tool_calls": [
+                    {"id": call.id, "type": "function",
+                     "function": {"name": call.function.name, "arguments": call.function.arguments}}
+                    for call in calls
+                ],
+            })
+            messages.extend(
+                {"role": "tool", "tool_call_id": call_id, "content": ("ERROR: " if is_error else "") + text}
+                for call_id, text, is_error in results
+            )
+        return _merge_rounds(rounds)
+
+    # ------------------------------------------- OpenAI-compatible (OpenAI, Meta)
+    async def _openai_call(
+        self,
+        *,
+        provider_name: str,
+        ledger: Ledger,
+        purpose: Purpose,
+        nominal_model: str,
         system: str,
         user: str,
         max_tokens: int,
         effort: str | None,
         schema: dict | None,
-    ) -> dict[str, Any]:
-        request: dict[str, Any] = {
-            "model": model,
-            "max_tokens": max_tokens,
-            "system": system,
-            "messages": [{"role": "user", "content": user}],
-        }
-        output_config: dict[str, Any] = {}
-        if effort is not None and model in config.SUPPORTS_EFFORT:
-            output_config["effort"] = effort
-        if schema is not None:
-            output_config["format"] = {"type": "json_schema", "schema": schema}
-        if output_config:
-            request["output_config"] = output_config
-        return request
-
-    @staticmethod
-    def _fallback_request(
-        request: dict[str, Any], system: str, schema: dict
-    ) -> dict[str, Any]:
-        fallback = dict(request)
-        output_config = dict(fallback.get("output_config", {}))
-        output_config.pop("format", None)
-        if output_config:
-            fallback["output_config"] = output_config
-        else:
-            fallback.pop("output_config", None)
-        schema_text = json.dumps(schema, separators=(",", ":"))
-        fallback["system"] = (
-            system
-            + "\n\nRespond with only a JSON object matching this schema: "
-            + schema_text
-        )
-        return fallback
-
-    def _result_from_response(
-        self,
-        *,
-        ledger: Ledger,
-        purpose: Purpose,
-        model: str,
-        response: Any,
-        schema: dict | None,
         task_id: str | None,
         agent_id: str | None,
-        started: float,
     ) -> LLMResult:
-        text_blocks = _text_blocks(response)
-        text = "".join(text_blocks)
-        stop_reason = getattr(response, "stop_reason", None)
-        usage_values = _usage_values(response)
+        import openai  # only needed for these providers
+
+        model = config.served_model(provider_name, nominal_model)
+        started = time.monotonic()
+        if self._client is None:
+            if provider_name == "meta":
+                self._client = openai.AsyncOpenAI(
+                    base_url=config.META_BASE_URL, api_key=config.meta_api_key(), timeout=NETWORK_TIMEOUT_SECONDS
+                )
+            else:
+                self._client = openai.AsyncOpenAI(timeout=NETWORK_TIMEOUT_SECONDS)
+        request = _openai_request(
+            provider_name=provider_name, model=model, system=system, user=user,
+            max_tokens=max_tokens, effort=effort, schema=schema,
+        )
+        try:
+            response = await asyncio.wait_for(
+                self._client.chat.completions.create(**request), timeout=NETWORK_TIMEOUT_SECONDS
+            )
+        except (openai.APIStatusError, openai.APIConnectionError, asyncio.TimeoutError) as exc:
+            self._record_error(ledger, purpose, model, task_id, agent_id, started, str(exc))
+            raise LLMError(str(exc)) from exc
+
+        choice = response.choices[0]
+        message = choice.message
+        text = message.content or ""
+        stop_reason = OPENAI_STOP_REASONS.get(choice.finish_reason, choice.finish_reason)
+        usage_values = _openai_usage_values(response)
         duration_ms = _duration_ms(started)
         price = cost_usd(
-            model,
-            usage_values["input_tokens"],
-            usage_values["output_tokens"],
-            usage_values["cache_read_input_tokens"],
-            usage_values["cache_creation_input_tokens"],
+            model, usage_values["input_tokens"], usage_values["output_tokens"], usage_values["cache_read_input_tokens"]
         )
 
-        if stop_reason == "refusal":
-            self._record(
-                ledger,
-                purpose,
-                model,
-                task_id,
-                agent_id,
-                usage_values,
-                price,
-                duration_ms,
-                False,
-                stop_reason,
-                "refusal",
-            )
-            raise LLMError("model refused the request")
+        def fail(error: str) -> LLMError:
+            self._record(ledger, purpose, model, task_id, agent_id, usage_values, price, duration_ms, False, stop_reason, error)
+            return LLMError(error)
 
+        if getattr(message, "refusal", None) or choice.finish_reason == "content_filter":
+            raise fail("model refused the request")
+        if not text.strip():
+            raise fail(f"empty response (finish_reason={choice.finish_reason})")
         data: dict | None = None
         if schema is not None:
             try:
-                data = _parse_json_object(text_blocks[0] if text_blocks else "")
-            except (json.JSONDecodeError, ValueError, IndexError) as exc:
-                self._record(
-                    ledger,
-                    purpose,
-                    model,
-                    task_id,
-                    agent_id,
-                    usage_values,
-                    price,
-                    duration_ms,
-                    False,
-                    stop_reason,
-                    str(exc),
-                )
-                raise LLMError(f"invalid JSON response: {exc}") from exc
+                data = _parse_json_object(text)
+            except (json.JSONDecodeError, ValueError) as exc:
+                raise fail(f"invalid JSON response: {exc}") from exc
 
-        self._record(
-            ledger,
-            purpose,
-            model,
-            task_id,
-            agent_id,
-            usage_values,
-            price,
-            duration_ms,
-            True,
-            stop_reason,
-            None,
-        )
+        self._record(ledger, purpose, model, task_id, agent_id, usage_values, price, duration_ms, True, stop_reason, None)
         usage = {
             "model": model,
             "input_tokens": usage_values["input_tokens"],
@@ -280,8 +309,11 @@ class LLM:
         if schema is None:
             data = None
         input_tokens = len(system + user) // 4
-        output_tokens = len(text) // 4 + THINKING_PAD[nominal_model]
-        price = cost_usd(nominal_model, input_tokens, output_tokens)
+        output_tokens = len(text) // 4 + THINKING_PAD.get(nominal_model, 0)
+        # Name and price fake calls as the provider's model for this tier, so
+        # fake mode's ledger and costs look like a real OpenAI / Muse run.
+        model = config.tier_model(nominal_model, self.provider_name)
+        price = cost_usd(model, input_tokens, output_tokens)
         duration_ms = _duration_ms(started)
         usage_values = {
             "input_tokens": input_tokens,
@@ -292,7 +324,7 @@ class LLM:
         self._record(
             ledger,
             purpose,
-            nominal_model,
+            model,
             task_id,
             agent_id,
             usage_values,
@@ -303,7 +335,7 @@ class LLM:
             None,
         )
         usage = {
-            "model": nominal_model,
+            "model": model,
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
             "cost_usd": price,
@@ -371,31 +403,91 @@ class LLM:
         )
 
 
+def _load_tools() -> ToolHub | None:
+    try:
+        return ToolHub.from_config()
+    except (OSError, ValueError) as exc:  # a broken mcp.json must not stop the market
+        logger.warning("ignoring MCP config: %s", exc)
+        return None
+
+
+def _tool_error(message: str, tools_ran: bool) -> LLMError:
+    error = LLMError(message)
+    error.tools_ran = tools_ran
+    return error
+
+
+def _json_args(raw: str | None) -> dict:
+    try:
+        parsed = json.loads(raw or "{}")
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _merge_rounds(rounds: list[LLMResult]) -> LLMResult:
+    """One work result from several tool round trips: the last answer, summed usage."""
+    last = rounds[-1]
+    usage = dict(last.usage)
+    for key in ("input_tokens", "output_tokens", "duration_ms"):
+        usage[key] = sum(r.usage[key] for r in rounds)
+    usage["cost_usd"] = round(sum(r.usage["cost_usd"] for r in rounds), 6)
+    return LLMResult(text=last.text, data=None, usage=usage, stop_reason=last.stop_reason)
+
+
 def _duration_ms(started: float) -> int:
     return round((time.monotonic() - started) * 1000)
 
 
-def _text_blocks(response: Any) -> list[str]:
-    texts: list[str] = []
-    for block in getattr(response, "content", []):
-        block_type = block.get("type") if isinstance(block, dict) else getattr(block, "type", None)
-        if block_type != "text":
-            continue
-        text = block.get("text") if isinstance(block, dict) else getattr(block, "text", "")
-        texts.append(text)
-    return texts
+OPENAI_STOP_REASONS = {"stop": "end_turn", "length": "max_tokens", "content_filter": "refusal"}
+# Reasoning models spend hidden tokens before answering, and those count against
+# the completion cap: give it headroom (only tokens actually used are billed).
+REASONING_HEADROOM = 4000
 
 
-def _usage_values(response: Any) -> dict[str, int]:
-    usage = response.usage
-    return {
-        "input_tokens": usage.input_tokens,
-        "output_tokens": usage.output_tokens,
-        "cache_read_input_tokens": getattr(usage, "cache_read_input_tokens", 0) or 0,
-        "cache_creation_input_tokens": getattr(
-            usage, "cache_creation_input_tokens", 0
+def _openai_request(
+    *,
+    provider_name: str,
+    model: str,
+    system: str,
+    user: str,
+    max_tokens: int,
+    effort: str | None,
+    schema: dict | None,
+) -> dict[str, Any]:
+    if schema is not None:
+        system += "\n\nRespond with only a JSON object matching this JSON schema: " + json.dumps(
+            schema, separators=(",", ":")
         )
-        or 0,
+    request: dict[str, Any] = {
+        "model": model,
+        "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+    }
+    if provider_name == "meta":
+        # Muse Spark reasons first; unset, a tiny call reasoned ~2,600 tokens.
+        request["max_tokens"] = max_tokens + REASONING_HEADROOM
+        request["reasoning_effort"] = effort if effort in {"minimal", "low", "medium", "high"} else "low"
+        return request
+    if model.startswith(("gpt-5", "o1", "o3", "o4")):
+        request["max_completion_tokens"] = max_tokens + REASONING_HEADROOM
+        request["reasoning_effort"] = effort if effort in {"low", "medium", "high"} else "low"
+    else:
+        request["max_tokens"] = max_tokens
+    if schema is not None:
+        request["response_format"] = {"type": "json_object"}
+    return request
+
+
+def _openai_usage_values(response: Any) -> dict[str, int]:
+    usage = response.usage
+    details = getattr(usage, "prompt_tokens_details", None)
+    cached = (getattr(details, "cached_tokens", 0) or 0) if details is not None else 0
+    return {
+        # input_tokens excludes cache reads (those are billed at a discount).
+        "input_tokens": max(0, usage.prompt_tokens - cached),
+        "output_tokens": usage.completion_tokens,
+        "cache_read_input_tokens": cached,
+        "cache_creation_input_tokens": 0,
     }
 
 
@@ -496,7 +588,7 @@ async def _smoke() -> int:
         result = await llm.call(
             ledger=ledger,
             purpose=purpose,
-            nominal_model="claude-haiku-4-5",
+            nominal_model="budget",
             system="Answer briefly.",
             user="Return a tiny answer.",
             max_tokens=128,

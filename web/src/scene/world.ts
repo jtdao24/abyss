@@ -46,8 +46,8 @@ export interface Interactable {
 }
 
 export const INTERACTABLES: Interactable[] = [
-  { id: "main", label: "MAIN AGENT - GIVE A JOB", hit: [445, 670, 575, 775], approach: { x: 312, y: 728 } },
-  { id: "reviewer", label: "REVIEWER", hit: [118, 470, 205, 580], approach: { x: 205, y: 615 } },
+  { id: "main", label: "CAPTAIN - GIVE A JOB", hit: [445, 670, 575, 775], approach: { x: 312, y: 728 } },
+  { id: "reviewer", label: "LIFEGUARD", hit: [118, 470, 205, 580], approach: { x: 205, y: 615 } },
   { id: "vendor:opus", label: "VENDOR 1", hit: [322, 245, 552, 478], approach: { x: 360, y: 466 } },
   { id: "vendor:sonnet", label: "VENDOR 2", hit: [732, 245, 952, 478], approach: { x: 765, y: 466 } },
   { id: "vendor:haiku", label: "VENDOR 3", hit: [1138, 245, 1368, 478], approach: { x: 1175, y: 466 } },

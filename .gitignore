@@ -8,3 +8,4 @@ web/public/fixtures/
 runs/
 .env
 web/public/results/
+mcp.json

@@ -37,7 +37,7 @@ def _record_fixture_usage(ledger: Ledger, events: list[dict]) -> None:
 
 
 def test_cost_usd() -> None:
-    assert cost_usd("claude-opus-5", 350, 180) == 0.00625
+    assert cost_usd("gpt-5", 1000, 1000) == 0.01125  # 1000 in at $1.25/M + 1000 out at $10/M
 
 
 def test_fixture_stats(fixture_events: list[dict]) -> None:
@@ -60,12 +60,12 @@ def test_record_appends_one_jsonl_line(tmp_path) -> None:
         "task_id": "t1",
         "agent_id": "haiku",
         "purpose": "work",
-        "model": "claude-haiku-4-5",
+        "model": "gpt-5-mini",
         "input_tokens": 10,
         "output_tokens": 20,
         "cache_read_input_tokens": 0,
         "cache_creation_input_tokens": 0,
-        "cost_usd": cost_usd("claude-haiku-4-5", 10, 20),
+        "cost_usd": cost_usd("gpt-5-mini", 10, 20),
         "ok": True,
         "stop_reason": "end_turn",
         "error": None,

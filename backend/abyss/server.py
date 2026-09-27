@@ -12,7 +12,8 @@ import contextlib
 import json
 import logging
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.staticfiles import StaticFiles
 
 from . import config
 from .contract import validate_event
@@ -20,6 +21,7 @@ from .events import EventStream, hello_data
 from .llm import LLM
 from .market import Guidance, run_job
 from .reputation import ReputationStore
+from .sessions import SessionStore, usage_summary
 
 
 logger = logging.getLogger(__name__)
@@ -28,6 +30,17 @@ reputation = ReputationStore(config.rep_path())
 llm = LLM()
 
 STEER_TARGETS = {"job", *(agent.agent_id for agent in config.AGENTS)}
+sessions = SessionStore()
+_provider_llms: dict[str, LLM] = {}
+
+
+def llm_for(provider: str | None) -> LLM:
+    """The default LLM, or one pinned to the provider a session picked."""
+    if provider is None or provider == config.provider():
+        return llm
+    if provider not in _provider_llms:
+        _provider_llms[provider] = LLM(provider=provider)
+    return _provider_llms[provider]
 
 
 class Market:
@@ -57,6 +70,7 @@ class Market:
                     await ws.send_json(event)
                 except Exception:  # a closed socket must not stop the market
                     self.clients.discard(ws)
+        sessions.observe(event)
 
     async def join(self, ws: WebSocket) -> None:
         hello = {"v": 1, "seq": 0, "t": 0, "job_id": None, "type": "hello", "data": hello_data(reputation)}
@@ -71,15 +85,18 @@ class Market:
         """An error for one connection only (bad message, busy market, ...)."""
         await ws.send_json(self.stream.stamp("error", {"message": message, "task_id": None, "fatal": False}, job_id=None))
 
-    def start(self, job: str, price_weight: float) -> None:
+    def start(self, job: str, price_weight: float, provider: str | None = None) -> None:
         self.backlog = []
         self.guidance = Guidance()
-        self.running = asyncio.create_task(self._run(job, price_weight, self.guidance))
+        sessions.expect(job, provider)
+        self.running = asyncio.create_task(self._run(job, price_weight, self.guidance, llm_for(provider)))
 
-    async def _run(self, job: str, price_weight: float, guidance: Guidance) -> None:
+    async def _run(self, job: str, price_weight: float, guidance: Guidance, job_llm: LLM | None = None) -> None:
         # A crashed job must tell everyone instead of leaving them waiting forever.
         try:
-            await run_job(job, stream=self.stream, llm=llm, rep=reputation, price_weight=price_weight, guidance=guidance)
+            await run_job(
+                job, stream=self.stream, llm=job_llm or llm, rep=reputation, price_weight=price_weight, guidance=guidance
+            )
         except Exception as exc:
             logger.exception("job crashed")
             with contextlib.suppress(Exception):
@@ -94,6 +111,47 @@ market = Market()
 @app.get("/health")
 async def health() -> dict[str, bool]:
     return {"ok": True}
+
+
+# ---------------------------------------------------------------- local API
+@app.get("/api/providers")
+async def api_providers() -> list[dict]:
+    """AIs this machine has keys for, the default first. Never includes keys."""
+    return [{"id": p, "label": config.PROVIDER_LABELS.get(p, p)} for p in config.available_providers()]
+
+
+@app.get("/api/prices")
+async def api_prices() -> dict:
+    """Which model serves each vendor per provider, and every model's price."""
+    agents = {agent.agent_id: agent.model for agent in config.AGENTS}
+    return {
+        "default_provider": config.provider(),
+        "fake": config.fake_llm(),
+        "test_mode": not config.real_models(),
+        "tiers": {
+            name: {agent_id: config.served_model(name, model) for agent_id, model in agents.items()}
+            for name in config.available_providers()
+        },
+        "prices": {model: list(price) for model, price in config.PRICES.items()},
+    }
+
+
+@app.get("/api/sessions")
+async def api_sessions() -> list[dict]:
+    return sessions.summaries()
+
+
+@app.get("/api/sessions/{job_id}")
+async def api_session(job_id: str) -> dict:
+    record = sessions.get(job_id)
+    if record is None:
+        raise HTTPException(404, "no such session")
+    return record
+
+
+@app.get("/api/usage")
+async def api_usage() -> dict:
+    return usage_summary(sessions)
 
 
 @app.websocket("/ws")
@@ -118,7 +176,7 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                 if error is not None:
                     await market.reply_error(ws, error)
                     continue
-                market.start(message["job"], message.get("price_weight", config.PRICE_WEIGHT))
+                market.start(message["job"], message.get("price_weight", config.PRICE_WEIGHT), message.get("provider"))
             elif message_type == "steer":
                 error = _validate_steer(message)
                 if error is None and (not market.busy or market.guidance is None):
@@ -163,4 +221,14 @@ def _validate_start(message: dict) -> str | None:
         or not 0 <= price_weight <= 10
     ):
         return "price_weight must be between 0 and 10"
+    provider = message.get("provider")
+    if provider is not None and provider not in config.available_providers():
+        return f"{config.PROVIDER_LABELS.get(provider, provider)} has no API key on this machine"
     return None
+
+
+# The built market view (web/dist), served at / so the whole tool is one port.
+# Mounted last so /api, /ws and /health win. `npm run dev` doesn't need it.
+_DIST = config.REPO_ROOT / "web" / "dist"
+if (_DIST / "index.html").exists():
+    app.mount("/", StaticFiles(directory=_DIST, html=True), name="web")

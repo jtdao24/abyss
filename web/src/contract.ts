@@ -198,6 +198,6 @@ export type AbyssEvent =
   | Envelope<"assembled", AssembledData>;
 
 export type ClientMsg =
-  | { type: "start_job"; job: string; price_weight?: number }
+  | { type: "start_job"; job: string; price_weight?: number; provider?: string }
   | { type: "reset" }
   | { type: "steer"; target: "job" | AgentId; note: string };

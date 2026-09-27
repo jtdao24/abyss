@@ -10,6 +10,7 @@ import {
   Rectangle,
   Sprite,
   Text,
+  UPDATE_PRIORITY,
   type FederatedPointerEvent,
   type Texture,
   type Ticker,
@@ -17,6 +18,8 @@ import {
 
 import type { AgentId, TaskType } from "../contract";
 import { Ambient, type AmbientData } from "./ambient";
+import { fitScale } from "./fit";
+import { THEME } from "../theme";
 import type { MarketState } from "../state/reducer";
 import { AGENT_ORDER, MAX_CARDS, VENDOR, sceneModel, type BubbleTone, type SceneModel } from "./model";
 import {
@@ -36,26 +39,26 @@ import {
 } from "./world";
 
 const FONT = ["Silkscreen", "monospace"];
-const PEOPLE_SCALE = 0.62;
+const PEOPLE_SCALE = 0.55;
 const PLAYER_SPEED = 280; // world px per second
 const HEAD = 84;          // bubble height above a person's feet
 const MAX_ZOOM = 3;       // focus never zooms past this multiple of the fitted view
-const PANEL_SHARE = 0.4;  // right-hand share of the stage covered by the focus panel
+const PANEL_SHARE = 0.42; // bottom share of the stage covered by the focus panel
 /** ?calm=1 turns off the rippling water and swaying leaves (for slow machines). */
 const CALM = new URLSearchParams(window.location.search).get("calm") === "1";
 
 export const PALETTE = {
-  ink: "#1b1b2f",
-  paper: "#fffdf6",
-  cream: "#f3e6c8",
-  gold: "#f0cb68",
-  good: "#3fb950",
-  ok: "#e0a82e",
-  bad: "#e0473c",
-  muted: "#8d96a0",
-  research: "#4aa8e0",
-  writing: "#e8a33d",
-  checking: "#d0508a",
+  ink: THEME.inkDark,
+  paper: THEME.paper,
+  cream: THEME.cream,
+  gold: THEME.goldDeep,
+  good: THEME.good,
+  ok: THEME.warn,
+  bad: THEME.bad,
+  muted: THEME.muted,
+  research: THEME.research,
+  writing: THEME.writing,
+  checking: THEME.checking,
 } as const;
 
 export const SPENT_POS = { x: WORLD.w - 14, y: 16 };
@@ -163,6 +166,7 @@ export class MarketScene {
   private camTarget = { scale: 1, x: 0, y: 0 };
   private cam = { scale: 1, x: 0, y: 0 };
   private focused: InteractId | null = null;
+  private watchdog: number | null = null;
 
   private constructor(el: HTMLElement, app: Application) {
     this.el = el;
@@ -173,9 +177,9 @@ export class MarketScene {
     await document.fonts.load('16px "Silkscreen"').catch(() => undefined);
     const app = new Application();
     await app.init({
-      resizeTo: el,
       backgroundAlpha: 0,
-      antialias: true,
+      antialias: false,
+      roundPixels: true,
       resolution: Math.min(2, window.devicePixelRatio || 1),
       autoDensity: true,
     });
@@ -192,6 +196,31 @@ export class MarketScene {
     // (Pixi's default caps it at 100ms, which makes everyone crawl below 10fps).
     app.ticker.minFPS = 4;
     const scene = new MarketScene(el, app);
+    // Draw each frame inside a guard. Pixi only schedules the next frame once
+    // this one returns, so one throw froze the scene for good; a throw can also
+    // leave its filter stack half pushed, failing every later frame right after
+    // the backdrop. Reset that, turn the ripples off, and keep drawing.
+    app.ticker.remove(app.render, app);
+    let failures = 0;
+    app.ticker.add(
+      () => {
+        try {
+          app.render();
+        } catch (error) {
+          failures += 1;
+          if (failures === 1) console.warn("A frame failed to render; ripples are now off", error);
+          try {
+            const filters = (app.renderer as unknown as { filter?: { _filterStackIndex: number } }).filter;
+            if (filters) filters._filterStackIndex = 0;
+          } catch {
+            /* private Pixi field; the next frame starts clean anyway */
+          }
+          scene.ambient?.disableEffects();
+        }
+      },
+      undefined,
+      UPDATE_PRIORITY.LOW,
+    );
     scene.ambient = new Ambient(backdrop, water, foliage, ambient, WORLD.w, !CALM);
     scene.build(backdrop, people);
     el.appendChild(app.canvas);
@@ -199,6 +228,7 @@ export class MarketScene {
     scene.resizeObserver = new ResizeObserver(() => scene.fit());
     scene.resizeObserver.observe(el);
     scene.fit();
+    scene.startWatchdog();
     return scene;
   }
 
@@ -211,6 +241,7 @@ export class MarketScene {
   }
 
   destroy(): void {
+    this.stopWatchdog();
     this.resizeObserver?.disconnect();
     this.app.ticker.remove(this.tick);
     this.app.destroy(true, { children: true });
@@ -229,12 +260,49 @@ export class MarketScene {
     this.camTarget = this.cameraFor(id);
   }
 
+  /**
+   * Keeps the render loop alive: if no frame has run for a while although the
+   * page is visible (e.g. after a minimize), restart the loop and refit.
+   */
+  private startWatchdog(): void {
+    let lastSeen = this.app.ticker.lastTime;
+    let stalledSince = performance.now();
+    this.watchdog = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      const now = performance.now();
+      if (this.app.ticker.lastTime !== lastSeen) {
+        lastSeen = this.app.ticker.lastTime;
+        stalledSince = now;
+        return;
+      }
+      if (now - stalledSince > 1500) {
+        stalledSince = now;
+        this.fit();
+        this.app.ticker.stop();
+        this.app.ticker.start();
+      }
+    }, 500);
+    document.addEventListener("visibilitychange", this.refit);
+    window.addEventListener("resize", this.refit);
+  }
+
+  private stopWatchdog(): void {
+    if (this.watchdog !== null) window.clearInterval(this.watchdog);
+    this.watchdog = null;
+    document.removeEventListener("visibilitychange", this.refit);
+    window.removeEventListener("resize", this.refit);
+  }
+
+  private readonly refit = (): void => {
+    if (document.visibilityState === "visible") this.fit();
+  };
+
   private fit(): void {
     const { clientWidth: w, clientHeight: h } = this.el;
-    if (!w || !h) return;
+    const fitted = fitScale(w, h, WORLD.w, WORLD.h);
+    if (!fitted) return; // minimized / hidden: keep the last good size
     this.app.renderer.resize(w, h);
-    const scale = Math.min(w / WORLD.w, h / WORLD.h);
-    this.base = { scale, x: Math.round((w - WORLD.w * scale) / 2), y: Math.round((h - WORLD.h * scale) / 2) };
+    this.base = fitted;
     this.camTarget = this.cameraFor(this.focused);
     if (this.focused === null) this.cam = { ...this.base };
   }
@@ -244,10 +312,10 @@ export class MarketScene {
     if (!rect) return { ...this.base };
     const { clientWidth: w, clientHeight: h } = this.el;
     const [x0, y0, x1, y1] = rect;
-    const viewW = w * (1 - PANEL_SHARE);
-    const scale = Math.min(this.base.scale * MAX_ZOOM, (viewW * 0.9) / (x1 - x0), (h * 0.9) / (y1 - y0));
-    let x = viewW / 2 - ((x0 + x1) / 2) * scale;
-    let y = h / 2 - ((y0 + y1) / 2) * scale;
+    const viewH = h * (1 - PANEL_SHARE); // frame the focus above the bottom panel
+    const scale = Math.min(this.base.scale * MAX_ZOOM, (w * 0.9) / (x1 - x0), (viewH * 0.9) / (y1 - y0));
+    let x = w / 2 - ((x0 + x1) / 2) * scale;
+    let y = viewH / 2 - ((y0 + y1) / 2) * scale;
     // keep the art filling the view where it can
     if (WORLD.w * scale > w) x = Math.min(0, Math.max(w - WORLD.w * scale, x));
     if (WORLD.h * scale > h) y = Math.min(0, Math.max(h - WORLD.h * scale, y));

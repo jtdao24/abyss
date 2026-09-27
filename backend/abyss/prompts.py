@@ -40,6 +40,13 @@ Task brief:
 Dependency outputs:
 {dependencies}"""
 
+WORK_TOOLS = """
+
+You have tools connected to outside apps (for example Slack, Discord or Notion).
+Use them to look things up when that helps the task. Only post, send, create or
+edit anything in those apps when your task brief asks for exactly that, and do it
+once. Say in your answer what you did with a tool."""
+
 WORK_GUIDANCE = """
 
 Guidance from the client while the job was running (follow it):

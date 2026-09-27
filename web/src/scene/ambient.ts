@@ -36,17 +36,31 @@ function noiseTexture(size = 256): Texture {
   return texture;
 }
 
-/** A copy of the backdrop, shown only through `mask`, distorted by moving noise. */
+/**
+ * The backdrop cut to a mask's shape, as its own texture, made once on a 2D
+ * canvas. The layer then needs no live mask: in Pixi 8 a sprite mask inside a
+ * filter can throw mid-frame, which is what froze the scene.
+ */
+function cutOut(backdrop: Texture, mask: Texture): Texture {
+  const canvas = document.createElement("canvas");
+  canvas.width = backdrop.width;
+  canvas.height = backdrop.height;
+  const ctx = canvas.getContext("2d")!;
+  ctx.drawImage(backdrop.source.resource as CanvasImageSource, 0, 0, canvas.width, canvas.height);
+  ctx.globalCompositeOperation = "destination-in"; // keep only where the mask is opaque
+  ctx.drawImage(mask.source.resource as CanvasImageSource, 0, 0, canvas.width, canvas.height);
+  return Texture.from(canvas);
+}
+
+/** A copy of the backdrop, cut to `mask`'s shape, distorted by moving noise. */
 function distorted(backdrop: Texture, mask: Texture, noise: Texture, scale: { x: number; y: number }) {
   const layer = new Container();
-  const art = new Sprite(backdrop);
-  const maskSprite = new Sprite(mask);
+  const art = new Sprite(cutOut(backdrop, mask));
   const map = new Sprite(noise);
   map.renderable = false; // only drives the filter
   art.filters = [new DisplacementFilter({ sprite: map, scale })];
-  art.mask = maskSprite;
-  layer.addChild(map, art, maskSprite);
-  return { layer, map };
+  layer.addChild(map, art);
+  return { layer, map, art };
 }
 
 interface Glint { g: Graphics; age: number; life: number }
@@ -57,6 +71,7 @@ export class Ambient {
   readonly front = new Container(); // glints, glows, leaves, above the planks
   private readonly waterMap: Sprite;
   private readonly foliageMap: Sprite;
+  private readonly rippled: Sprite[];
   private readonly glints: Glint[] = [];
   private readonly glows: { g: Graphics; phase: number }[] = [];
   private readonly leaves: Leaf[] = [];
@@ -77,6 +92,7 @@ export class Ambient {
     this.waterMap = w.map;
     this.foliageMap = f.map;
     this.foliageMap.scale.set(1.5);
+    this.rippled = [w.art, f.art];
     if (ripples) this.back.addChild(w.layer, f.layer);
 
     for (const [x, y] of data.lanterns) {
@@ -86,6 +102,11 @@ export class Ambient {
       this.front.addChild(g);
       this.glows.push({ g, phase: Math.random() * 10 });
     }
+  }
+
+  /** Drop the ripple filters (the art stays, just still): the fallback if they fail to render. */
+  disableEffects(): void {
+    for (const art of this.rippled) art.filters = null;
   }
 
   update(ticker: Ticker): void {

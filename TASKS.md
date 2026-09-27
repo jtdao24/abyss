@@ -412,7 +412,7 @@ async def run_job(job_text: str, *, stream: EventStream, llm: LLM, rep: Reputati
   - `Graphics().rect().fill()` (not `beginFill`)
   - `TextureSource.defaultOptions.scaleMode = 'nearest'`
 - Logical resolution **480×270**, scaled by the largest integer that fits the container. Use CSS `image-rendering: pixelated`.
-- All art comes from code: `src/scene/sprites.ts` defines sprites as string arrays (e.g. `"..aa.."`) plus a palette, turned into textures with `renderer.generateTexture`. No external image assets.
+- ~~All art comes from code: `src/scene/sprites.ts`...~~ Superseded: the scene now uses painted art in `public/art/`. Characters are 8-bit PNGs in `public/art/characters/` (Captain on the boat, Lifeguard reviewer, Shell Seller / Fishmonger / Shaved-Ice Kid vendors, beachgoer player), made from AI-generated cut-outs by `web/scripts/prep_characters.py`.
 - Layout, left→right:
   - **harbor master** (orchestrator) at a **notice board** (the job's tasks as cards: pending/open/done, colored by type)
   - three **stalls**, one per agent, each with an awning in the agent color and a keeper sprite, name plate, and reputation bars for R/W/C

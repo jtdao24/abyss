@@ -89,7 +89,7 @@ function PastJobs({ state }: { state: MarketState }) {
 function MainAgentDialog({ state, onClose }: GameDialogProps) {
   if (!state.currentJob && !state.jobActive) {
     return (
-      <Shell title="Main Agent" subtitle="Give me jobs from the terminal chat." onClose={onClose}>
+      <Shell title="Captain" subtitle="Ahoy! Got a job for the crew? Send it from the terminal chat." onClose={onClose}>
         <p>Open a terminal and run <code>{CHAT_COMMAND}</code>, then type what you need. I'll split it into tasks, the vendors will bid for them, and the finished file lands in your Downloads folder.</p>
         <PastJobs state={state} />
       </Shell>
@@ -100,9 +100,9 @@ function MainAgentDialog({ state, onClose }: GameDialogProps) {
     ? state.final.filename ? `Done — sent ${state.final.filename} to your Downloads folder.` : "The job ended without a file."
     : state.assembled
       ? `Packaging everything into ${state.assembled.filename}...`
-      : "On it! The market is working.";
+      : "Aye aye! The crew is on it.";
   return (
-    <Shell title="Main Agent" subtitle={subtitle} onClose={onClose}>
+    <Shell title="Captain" subtitle={subtitle} onClose={onClose}>
       {job && <p className="job-quote">"{job.jobText}"</p>}
       <ul className="task-lines">
         {state.taskOrder.map((id) => <TaskRow key={id} task={state.tasks[id]} />)}
@@ -188,7 +188,7 @@ function VendorDialog({ state, onClose, agentId }: GameDialogProps & { agentId: 
 function TasksDialog({ state, onClose }: GameDialogProps) {
   const open = state.taskOrder.map((id) => state.tasks[id]);
   return (
-    <Shell side={false} title="Tasks" subtitle={open.length ? `${open.length} tasks for the current job` : `No tasks yet. Give the Main Agent a job from the terminal (${CHAT_COMMAND}).`} onClose={onClose}>
+    <Shell side={false} title="Tasks" subtitle={open.length ? `${open.length} tasks for the current job` : `No tasks yet. Give the Captain a job from the terminal (${CHAT_COMMAND}).`} onClose={onClose}>
       <ul className="board-list">
         {open.map((task) => (
           <li key={task.task_id}>
@@ -216,7 +216,7 @@ function TasksDialog({ state, onClose }: GameDialogProps) {
 function ReviewerDialog({ state, onClose }: GameDialogProps) {
   const graded = state.taskOrder.map((id) => state.tasks[id]).filter((t) => t.grade !== null);
   return (
-    <Shell title="Reviewer" subtitle="I grade blind: I never know which vendor did the work." onClose={onClose}>
+    <Shell title="Lifeguard" subtitle="I keep watch and grade blind: I never know which vendor did the work." onClose={onClose}>
       {graded.length === 0 && <p>Nothing to review yet.</p>}
       <ul className="board-list">
         {graded.map((task) => {

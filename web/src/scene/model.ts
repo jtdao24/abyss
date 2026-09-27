@@ -1,5 +1,6 @@
 // Pure derivation of what the market scene shows for a given MarketState.
 // Scene.ts only draws this; nothing here touches Pixi, so it is unit-testable.
+import { THEME } from "../theme";
 import type { AgentId, TaskType } from "../contract";
 import type { AgentStatus, MarketState, TaskStatus, TaskView } from "../state/reducer";
 
@@ -10,9 +11,9 @@ export const MAX_CARDS = 5;
 /** Public stall names. The market never shows which model runs a stall;
  *  the real model names only appear in the (hidden) ledger panel. */
 export const VENDOR: Record<AgentId, { name: string; tier: string; color: string }> = {
-  opus: { name: "VENDOR 1", tier: "PREMIUM", color: "#2f6fd6" },   // blue stall
-  sonnet: { name: "VENDOR 2", tier: "PREMIUM", color: "#d64545" }, // red stall
-  haiku: { name: "VENDOR 3", tier: "BUDGET", color: "#8a4fd0" },   // purple stall
+  opus: { name: "VENDOR 1", tier: "PREMIUM", color: THEME.vendorOpus },   // blue stall
+  sonnet: { name: "VENDOR 2", tier: "PREMIUM", color: THEME.vendorSonnet }, // red stall
+  haiku: { name: "VENDOR 3", tier: "BUDGET", color: THEME.vendorHaiku },   // purple stall
 };
 
 export type BubbleTone = "thinking" | "bid" | "pass" | "won" | "working" | "done";
@@ -157,7 +158,7 @@ export function sceneModel(state: MarketState): SceneModel {
       ? `${state.taskOrder.length} TASKS POSTED`
       : state.currentJob || state.jobActive
         ? "SPLITTING JOB..."
-        : "MAIN AGENT";
+        : "CAPTAIN";
 
   return {
     stalls,

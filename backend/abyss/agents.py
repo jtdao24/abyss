@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import math
 
-from . import prompts
+from . import config, prompts
 from .config import AgentSpec, BID_EFFORT, WORK_EFFORT
 from .ledger import Ledger
 from .llm import LLM
@@ -49,7 +49,8 @@ async def request_bid(
         nominal_model=agent.model,
         system=prompts.BID_SYSTEM,
         user=prompts.BID_USER.format(
-            agent_name=agent.display_name,
+            # The model this stall really runs on for the session's AI (e.g. "GPT-5 mini").
+            agent_name=config.model_label(config.tier_model(agent.model, getattr(llm, "provider_name", None))),
             agent_id=agent.agent_id,
             job_text=job_text,
             task_type=task.type,
