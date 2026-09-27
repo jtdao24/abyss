@@ -18,6 +18,7 @@ import { ResultPanel } from "./ui/ResultPanel";
 import { openResult, resultDoc } from "./ui/resultView";
 import { SpendMeter } from "./ui/SpendMeter";
 import { GameDialog } from "./ui/GameDialog";
+import { Intro } from "./ui/Intro";
 import { Ledger } from "./ui/Ledger";
 
 const params = new URLSearchParams(window.location.search);
@@ -139,7 +140,7 @@ export default function App() {
       scene.onInteract = (id) => openDialog(id);
       scene.onGround = () => openDialog(null);
       directorRef.current = new Director(created, SPEED);
-      if (import.meta.env.DEV) (window as unknown as { __abyss: unknown }).__abyss = { scene: created, store };
+      if (import.meta.env.DEV) (window as unknown as { __abyss: unknown }).__abyss = { scene: created, store, director: directorRef.current };
       scene.render(store.getState());
       unsubscribe = store.subscribe(() => scene?.render(store.getState()));
       setSceneReady(true);
@@ -157,7 +158,11 @@ export default function App() {
     };
   }, []);
 
+  // A replay waits for the intro to finish so its opening isn't hidden behind it.
+  const [introDone, setIntroDone] = useState(false);
+  const startSource = SOURCE !== "fixture" || introDone;
   useEffect(() => {
+    if (!startSource) return;
     const unsubscribe = store.subscribe(() => setState(store.getState()));
     const source = createSource();
     sourceRef.current = source;
@@ -181,7 +186,7 @@ export default function App() {
       source.stop();
       unsubscribe();
     };
-  }, []);
+  }, [startSource]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -299,22 +304,17 @@ export default function App() {
                 </button>
               ))}
             </nav>
-            {!sceneReady && (
-              <div className="stage-placeholder" role={sceneError ? "alert" : undefined}>
+            {sceneError && (
+              <div className="stage-placeholder" role="alert">
                 <span>ABYSS MARKET</span>
-                {sceneError ? (
-                  <>
-                    <small>THE BOARDWALK DIDN'T LOAD</small>
-                    <p className="stage-error">{sceneError}</p>
-                    <button type="button" className="ledger-toggle" onClick={() => window.location.reload()}>
-                      Try again
-                    </button>
-                  </>
-                ) : (
-                  <small>SETTING UP THE BOARDWALK</small>
-                )}
+                <small>THE BOARDWALK DIDN'T LOAD</small>
+                <p className="stage-error">{sceneError}</p>
+                <button type="button" className="ledger-toggle" onClick={() => window.location.reload()}>
+                  Try again
+                </button>
               </div>
             )}
+            {!sceneError && <Intro ready={sceneReady} onDone={() => setIntroDone(true)} />}
             {notice && (
               <div className="market-notice" role="status">
                 <span>{notice}</span>

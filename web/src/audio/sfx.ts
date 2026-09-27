@@ -5,7 +5,6 @@
 // Browsers keep audio locked until the first click or key, so sounds before
 // that are dropped. Muting is remembered per browser.
 import type { AbyssEvent } from "../contract";
-import { verdict } from "../scene/model";
 
 type Wave = "square" | "triangle" | "sawtooth";
 
@@ -217,7 +216,11 @@ export const sfx = {
   },
 };
 
-/** Sounds for market events, played alongside the Director's animations. */
+/**
+ * Sounds for market events that happen the moment the event arrives. Win, work,
+ * hand-in and grade sounds belong to an animation that waits for a vendor to
+ * walk somewhere, so the Director plays those when it gets there.
+ */
 export function onMarketEvent(ev: AbyssEvent): void {
   switch (ev.type) {
     case "job_split":
@@ -229,19 +232,6 @@ export function onMarketEvent(ev: AbyssEvent): void {
     case "bid":
       if (ev.data.ok) sfx.bid();
       break;
-    case "won":
-      sfx.won();
-      break;
-    case "working":
-      sfx.working();
-      break;
-    case "done":
-      sfx.done(Math.round(ev.data.usage.cost_usd * 1000));
-      break;
-    case "graded": {
-      sfx.graded(verdict(ev.data.grade, ev.data.promised_quality));
-      break;
-    }
     case "steered":
       sfx.steer();
       break;

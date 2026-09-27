@@ -22,7 +22,7 @@ import { Ambient, type AmbientData } from "./ambient";
 import { fitScale } from "./fit";
 import { THEME } from "../theme";
 import type { MarketState } from "../state/reducer";
-import { AGENT_ORDER, MAX_CARDS, VENDOR, sceneModel, type BubbleTone, type SceneModel } from "./model";
+import { AGENT_ORDER, MAX_CARDS, VENDOR, sceneModel, type BubbleTone, type SceneModel, type StallModel } from "./model";
 import {
   MAIN_AGENT_POS,
   PLAYER_START,
@@ -74,6 +74,15 @@ const TYPE_COLOR: Record<TaskType, string> = {
   writing: PALETTE.writing,
   checking: PALETTE.checking,
 };
+/** What a vendor is visibly doing with a task it won (director.ts plays it out). */
+export type VendorStage = "none" | "won" | "working" | "done";
+const WINNER_TONES = new Set<BubbleTone>(["won", "working", "done"]);
+const STAGE_BUBBLE: Record<Exclude<VendorStage, "none">, NonNullable<StallModel["bubble"]>> = {
+  won: { text: "WON!", tone: "won" },
+  working: { text: "WORKING", tone: "working" },
+  done: { text: "DONE", tone: "done" },
+};
+
 const BUBBLE_TEXT: Record<BubbleTone, string> = {
   thinking: PALETTE.muted,
   bid: PALETTE.ink,
@@ -167,6 +176,7 @@ export class MarketScene {
   /** Walking time since the player's last footstep sound. */
   private stepMs = 0;
   private lastModel = "";
+  private model: SceneModel | null = null;
   private resizeObserver: ResizeObserver | null = null;
   private ambient!: Ambient;
   /** Camera: the fitted view, where it is heading, and where it is now. */
@@ -250,7 +260,22 @@ export class MarketScene {
     const key = JSON.stringify(model);
     if (key === this.lastModel) return;
     this.lastModel = key;
+    this.model = model;
     this.apply(model);
+  }
+
+  /**
+   * Set by director.ts: what a vendor is visibly doing, so WON! / WORKING / DONE
+   * appear when the animation gets there, not when the event arrives.
+   * Without a director, bubbles follow the state alone.
+   */
+  stageOf: ((agentId: AgentId) => VendorStage) | null = null;
+  /** Set by director.ts: true while finished work is still on its way to the reviewer. */
+  handOverPending: (() => boolean) | null = null;
+
+  /** Re-draw the bubbles after the director's picture of things changes. */
+  refreshBubbles(): void {
+    if (this.model) this.apply(this.model);
   }
 
   destroy(): void {
@@ -548,6 +573,13 @@ export class MarketScene {
   }
 
   // ------------------------------------------------------------ state -> picture
+  /** The winner's WON! / WORKING / DONE follow the animation; bidding bubbles follow the state. */
+  private shownBubble(agentId: AgentId, fromState: StallModel["bubble"]): StallModel["bubble"] {
+    if (!this.stageOf || !fromState || !WINNER_TONES.has(fromState.tone)) return fromState;
+    const stage = this.stageOf(agentId);
+    return stage === "none" ? null : STAGE_BUBBLE[stage];
+  }
+
   private apply(model: SceneModel): void {
     this.banner.text = model.banner.length > 90 ? `${model.banner.slice(0, 87)}...` : model.banner;
     this.spent.text = model.spent;
@@ -555,7 +587,7 @@ export class MarketScene {
     for (const agentId of AGENT_ORDER) {
       const stall = model.stalls.find((s) => s.agentId === agentId) ?? null;
       this.winnerFlags[agentId].visible = stall?.winner ?? false;
-      const bubble = stall?.bubble ?? null;
+      const bubble = this.shownBubble(agentId, stall?.bubble ?? null);
       this.vendorBubbles[agentId].set(
         bubble?.text ?? null,
         bubble ? BUBBLE_TEXT[bubble.tone] : PALETTE.ink,
@@ -565,7 +597,9 @@ export class MarketScene {
 
     this.mainBubble.set(model.mainAgent);
 
-    if (model.reviewing) this.reviewBubble.set("...", PALETTE.muted);
+    // The reviewer only reacts once the work has actually been handed over.
+    if (this.handOverPending?.()) this.reviewBubble.set(null);
+    else if (model.reviewing) this.reviewBubble.set("...", PALETTE.muted);
     else if (model.review) {
       const grade = model.review.text.split(" ")[1];
       const tone = model.review.tone;
