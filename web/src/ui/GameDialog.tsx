@@ -1,7 +1,7 @@
 // Panels for whoever the player walked up to. The Captain is a terminal (type a
 // job or a /command); the vendors show live progress and can be steered. The
 // terminal chat (python -m abyss.chat) still works alongside.
-import type { ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
 
 import type { Provider, SessionSummary } from "../api";
 import type { AgentId, ClientMsg } from "../contract";
@@ -9,6 +9,7 @@ import { VENDOR, formatCents } from "../scene/model";
 import type { InteractId } from "../scene/world";
 import type { MarketState, TaskView } from "../state/reducer";
 import { CaptainTerminal } from "./CaptainTerminal";
+import { useDialogFocus } from "./useDialogFocus";
 import { VendorPanel } from "./VendorPanel";
 
 interface GameDialogProps {
@@ -24,8 +25,10 @@ interface GameDialogProps {
 }
 
 function Shell({ title, subtitle, onClose, children, side = true }: { title: string; subtitle?: string; onClose(): void; children: ReactNode; side?: boolean }) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  useDialogFocus(ref);
   return (
-    <div className={`rpg-dialog ${side ? "side" : ""}`} role="dialog" aria-label={title} onPointerDown={(e) => e.stopPropagation()}>
+    <div ref={ref} className={`rpg-dialog ${side ? "side" : ""}`} role="dialog" aria-label={title} onPointerDown={(e) => e.stopPropagation()}>
       <header>
         <div>
           <strong>{title}</strong>
@@ -45,7 +48,7 @@ function vendorName(agentId: AgentId | null): string {
 function TasksDialog({ state, onClose }: GameDialogProps) {
   const open = state.taskOrder.map((id) => state.tasks[id]);
   return (
-    <Shell side={false} title="Tasks" subtitle={open.length ? `${open.length} tasks for the current job` : "No tasks yet. Click the Captain on the boat to start a session."} onClose={onClose}>
+    <Shell side={false} title="Tasks" subtitle={open.length ? `${open.length} tasks for the current job` : "No tasks yet. Open the Captain (the boat, or press C) to start a session."} onClose={onClose}>
       <ul className="board-list">
         {open.map((task) => (
           <li key={task.task_id}>

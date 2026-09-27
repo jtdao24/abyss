@@ -9,6 +9,7 @@ import { formatUsd } from "../state/money";
 import type { MarketState } from "../state/reducer";
 import { downloadText, openResult, resultDoc, stoppedJobs } from "./resultView";
 import { eventKey, nearBottom } from "./terminalScroll";
+import { useDialogFocus } from "./useDialogFocus";
 
 type Tone = "plain" | "dim" | "bold" | "cyan" | "green" | "yellow" | "red" | "echo";
 type Line = { text: string; tone: Tone; action?: { label: string; run: () => void } };
@@ -177,6 +178,8 @@ export function CaptainTerminal({ state, onClose, send, providers = [], sessions
   const screen = useRef<HTMLDivElement | null>(null);
   const field = useRef<HTMLInputElement | null>(null);
   const filePicker = useRef<HTMLInputElement | null>(null);
+  const dialog = useRef<HTMLDivElement | null>(null);
+  useDialogFocus(dialog); // the prompt gets focus; closing hands it back
   const live = Boolean(send);
   const running = state.jobActive;
 
@@ -211,7 +214,6 @@ export function CaptainTerminal({ state, onClose, send, providers = [], sessions
         live ? { text: "Type a job below and press Enter.", tone: "dim" } : { text: "This is a replay: you can watch and read, but not start jobs.", tone: "dim" },
       );
     }
-    field.current?.focus();
     if (live) api.mcp().then((v) => (term.toolServers = v.servers.filter((s) => s.state === "ready"))).catch(() => undefined);
   }, []);
 
@@ -553,7 +555,7 @@ export function CaptainTerminal({ state, onClose, send, providers = [], sessions
   });
 
   return (
-    <div className="rpg-dialog captain-term" role="dialog" aria-label="Captain terminal" onPointerDown={(e) => e.stopPropagation()}>
+    <div ref={dialog} className="rpg-dialog captain-term" role="dialog" aria-label="Captain terminal" onPointerDown={(e) => e.stopPropagation()}>
       <div className="ct-bar">
         <span className="ct-dots"><i /><i /><i /></span>
         <strong>captain@abyss</strong>
@@ -588,6 +590,7 @@ export function CaptainTerminal({ state, onClose, send, providers = [], sessions
         <span>you ›</span>
         <input
           ref={field}
+          data-autofocus
           value={input}
           spellCheck={false}
           autoComplete="off"

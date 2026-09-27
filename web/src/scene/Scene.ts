@@ -46,7 +46,10 @@ const HEAD = 84;          // bubble height above a person's feet
 const MAX_ZOOM = 3;       // focus never zooms past this multiple of the fitted view
 const PANEL_SHARE = 0.42; // bottom share of the stage covered by the focus panel
 /** ?calm=1 turns off the rippling water and swaying leaves (for slow machines). */
-const CALM = new URLSearchParams(window.location.search).get("calm") === "1";
+/** Also on when the system asks for less motion. */
+const CALM =
+  new URLSearchParams(window.location.search).get("calm") === "1" ||
+  (typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
 
 export const PALETTE = {
   ink: THEME.inkDark,
@@ -228,6 +231,11 @@ export class MarketScene {
     scene.build(backdrop, people);
     el.appendChild(app.canvas);
     app.canvas.classList.add("market-canvas");
+    app.canvas.setAttribute("role", "img");
+    app.canvas.setAttribute(
+      "aria-label",
+      "The boardwalk market: the Captain on the boat, three vendor stalls and the lifeguard. Use the Captain button or the list of people to open their panels.",
+    );
     scene.resizeObserver = new ResizeObserver(() => scene.fit());
     scene.resizeObserver.observe(el);
     scene.fit();

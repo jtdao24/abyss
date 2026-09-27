@@ -28,6 +28,15 @@ const SOURCE = params.get("source") === "fixture" ? "fixture" : "ws"; // live by
 const WS_URL = import.meta.env.VITE_WS_URL ?? `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/ws`;
 const parsedSpeed = Number(params.get("speed") || "1");
 const SPEED = SOURCE === "fixture" && Number.isFinite(parsedSpeed) && parsedSpeed > 0 ? parsedSpeed : 1;
+/** Everyone you can walk up to on the boardwalk, for the keyboard. */
+const PEOPLE: [InteractId, string][] = [
+  ["main", "Captain"],
+  ["tasks", "Tasks"],
+  ["vendor:opus", "Vendor 1"],
+  ["vendor:sonnet", "Vendor 2"],
+  ["vendor:haiku", "Vendor 3"],
+  ["reviewer", "Lifeguard"],
+];
 /** How long after a hello incoming events count as the server's catch-up burst. */
 const CATCH_UP_MS = 400;
 
@@ -157,7 +166,21 @@ export default function App() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") openDialog(null);
+      const typing = e.target instanceof HTMLElement && e.target.closest("input, textarea, select, [contenteditable='true']");
+      if (e.key === "Escape") {
+        // Esc closes the side panel you're in, else the market's panel.
+        const inSide = e.target instanceof HTMLElement && e.target.closest(".cost-panel, .ledger");
+        if (inSide) {
+          setShowLedger(false);
+          setShowTools(false);
+        } else openDialog(null);
+        return;
+      }
+      // C opens the Captain from anywhere you aren't typing.
+      if (!typing && !e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === "c") {
+        e.preventDefault();
+        openDialog("main");
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -195,9 +218,19 @@ export default function App() {
               {badge.label}
             </span>
           </div>
-          <p className="header-hint">Click the Captain on the boat to give a job · click anyone to zoom in</p>
+          <p className="header-hint">Click the Captain on the boat (or press C) to give a job · click anyone to zoom in</p>
           <CostCompare state={state} />
           <div className="header-actions" role="toolbar" aria-label="Panels">
+            <button
+              type="button"
+              className="ledger-toggle captain-toggle"
+              aria-pressed={dialog === "main"}
+              aria-keyshortcuts="C"
+              title="Open the Captain's terminal (C)"
+              onClick={() => openDialog(dialog === "main" ? null : "main")}
+            >
+              Captain
+            </button>
             {SOURCE === "ws" && (
               <button
                 type="button"
@@ -238,6 +271,15 @@ export default function App() {
         </header>
         <div className="stage-fit">
           <div id="stage" ref={stageRef}>
+            {/* The market is a picture you click. For the keyboard, the same
+                people as buttons, shown when you tab into them. */}
+            <nav className="scene-nav" aria-label="People on the boardwalk">
+              {PEOPLE.map(([id, label]) => (
+                <button key={id} type="button" aria-pressed={dialog === id} onClick={() => openDialog(dialog === id ? null : id)}>
+                  {label}
+                </button>
+              ))}
+            </nav>
             {!sceneReady && (
               <div className="stage-placeholder">
                 <span>ABYSS MARKET</span>
