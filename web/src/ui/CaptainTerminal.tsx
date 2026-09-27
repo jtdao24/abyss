@@ -2,7 +2,7 @@
 // market streams its progress back, line by line, like `python -m abyss.chat`.
 import { useEffect, useReducer, useRef, useState, type ReactNode } from "react";
 
-import { api, type Attachment, type Provider, type SessionSummary } from "../api";
+import { api, type Attachment, type McpServer, type Provider, type SessionSummary } from "../api";
 import type { AbyssEvent, AgentId, ClientMsg } from "../contract";
 import type { MarketState } from "../state/reducer";
 
@@ -33,6 +33,7 @@ const HELP: Line[] = [
   ["  /budget <usd|off>           hard spending cap for your next job", "plain"],
   ["  /ai [name]                  pick the AI for your next job", "plain"],
   ["  /link <url>  /file          attach a link or a file to your next job", "plain"],
+  ["  /tools [on|off <name>|all]  which tool servers the vendors may use", "plain"],
   ["  /examples  /example <n>     sample jobs (puts one on the prompt)", "plain"],
   ["  /estimate                   what a typical job costs", "plain"],
   ["  /result  /save              read or download the finished file", "plain"],
@@ -124,6 +125,9 @@ const term = {
   budget: null as number | null,
   provider: null as string | null,
   attachments: [] as Attachment[],
+  /** Connected tool servers (ready ones), and the ones left out of your next job. */
+  toolServers: [] as McpServer[],
+  toolsOff: [] as string[],
 };
 
 interface Props {
@@ -159,6 +163,7 @@ export function CaptainTerminal({ state, onClose, send, providers = [], sessions
       );
     }
     field.current?.focus();
+    if (live) api.mcp().then((v) => (term.toolServers = v.servers.filter((s) => s.state === "ready"))).catch(() => undefined);
   }, []);
 
   // Stay pinned to the newest line while the market talks (unless you scrolled up).
@@ -204,6 +209,8 @@ export function CaptainTerminal({ state, onClose, send, providers = [], sessions
         ...(term.provider ? { provider: term.provider } : {}),
         ...(term.budget !== null ? { budget_usd: term.budget } : {}),
         ...(term.attachments.length ? { attachments: term.attachments.map((a) => a.id) } : {}),
+        // Tools are all on unless you switched some off (then send the ones still on).
+        ...(term.toolsOff.length ? { tools: term.toolServers.map((t) => t.name).filter((n) => !term.toolsOff.includes(n)) } : {}),
       });
       if (!sent) return print({ text: "couldn't send that: the connection dropped", tone: "red" });
       term.attachments = [];
@@ -226,6 +233,7 @@ export function CaptainTerminal({ state, onClose, send, providers = [], sessions
         if (term.budget !== null) bits.push(`budget $${term.budget}`);
         if (term.provider) bits.push(`AI ${term.provider}`);
         if (term.attachments.length) bits.push(`${term.attachments.length} attached`);
+        if (term.toolsOff.length) bits.push(`${term.toolsOff.length} tool server${term.toolsOff.length === 1 ? "" : "s"} off`);
         return print({ text: bits.join(" · "), tone: "dim" });
       }
       case "price": {
@@ -267,6 +275,38 @@ export function CaptainTerminal({ state, onClose, send, providers = [], sessions
       case "detach":
         term.attachments = [];
         return print({ text: "attachments cleared", tone: "dim" });
+      case "tools": {
+        if (needLive()) return;
+        const [action, ...nameParts] = rest.split(" ");
+        const name = nameParts.join(" ").trim().toLowerCase();
+        api.mcp().then(
+          (v) => {
+            term.toolServers = v.servers.filter((t) => t.state === "ready");
+            const find = () => term.toolServers.find((t) => t.name.toLowerCase() === name || t.label.toLowerCase() === name);
+            if (action === "all") {
+              term.toolsOff = [];
+              return print({ text: "every tool server is on for your next job", tone: "dim" });
+            }
+            if (action === "on" || action === "off") {
+              const server = find();
+              if (!server) return print({ text: `no connected tool server called "${name}" (try /tools)`, tone: "red" });
+              term.toolsOff = action === "off" ? [...new Set([...term.toolsOff, server.name])] : term.toolsOff.filter((n) => n !== server.name);
+              return print({ text: `${server.label} is ${action} for your next job`, tone: "dim" });
+            }
+            if (action) return print({ text: "usage: /tools, /tools on <name>, /tools off <name>, /tools all", tone: "red" });
+            if (!term.toolServers.length) return print({ text: "no tool servers connected (add some with the Tools button)", tone: "dim" });
+            print(
+              ...term.toolServers.map((t) => ({
+                text: `  ${term.toolsOff.includes(t.name) ? "·" : "✓"} ${t.name} — ${t.label} (${t.tools.length} tools)${term.toolsOff.includes(t.name) ? ", off" : ""}`,
+                tone: (term.toolsOff.includes(t.name) ? "dim" : "plain") as Tone,
+              })),
+              { text: "/tools off <name> leaves one out of your next job", tone: "dim" },
+            );
+          },
+          () => print({ text: "couldn't reach the tool servers", tone: "red" }),
+        );
+        return;
+      }
       case "examples":
         return print(...EXAMPLES.map((e, i) => `  ${i + 1}. ${e}`), { text: "/example <n> puts one on the prompt to edit", tone: "dim" });
       case "example": {

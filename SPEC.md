@@ -216,7 +216,7 @@ WebSocket `ws://localhost:8000/ws`, JSON text frames.
 
 | type | payload | server behavior |
 |---|---|---|
-| `start_job` | `{type, job: string (1–2000 chars), price_weight?: number (0–10)}` | Runs one job and streams its events. If a job is already running on this connection, it replies `error{fatal:false}`. |
+| `start_job` | `{type, job: string (1–2000 chars), price_weight?: number (0–10), provider?, budget_usd?, attachments?, tools?: string[] (MCP servers the vendors may use; omitted = all)}` | Runs one job and streams its events. If a job is already running on this connection, it replies `error{fatal:false}`. |
 | `steer` | `{type, target: "job"\|AgentId, note: string (1–500 chars)}` | Only while a job runs. Adds a note to that job: `"job"` notes go to every remaining work and review prompt; an agent's notes go to that agent's work (and its review). Notes are read when each work call starts, so they apply from the next piece of work on; a call already running is not changed. Replies `steered`, or `error{fatal:false}` if no job is running or the message is invalid. |
 | `reset` | `{type}` | Resets reputation to `REP_INIT` for everyone, persists it and re-sends `hello`. Rejected while a job runs. |
 
