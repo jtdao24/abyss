@@ -476,3 +476,40 @@ th { color: #7fb7b6; }
 }
 /* The cost drawer is a fixed 340px so the stage keeps its width (and fills). */
 .app-shell:not(.ledger-hidden):has(.cost-panel) { grid-template-columns: minmax(480px, 1fr) 340px; }
+
+/* ---- session templates and attachments ---- */
+.template-row, .attach-row { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+.chip {
+  padding: 4px 8px; color: var(--abyss-ink-text); background: var(--abyss-cream); border: 2px solid var(--abyss-ring-soft);
+  border-radius: 12px; cursor: pointer; font: 10px var(--font-mono);
+}
+.chip:hover:not(:disabled) { border-color: var(--abyss-ink); }
+.chip:disabled { opacity: 0.5; cursor: default; }
+.link-input {
+  flex: 1 1 160px; min-width: 0; padding: 5px 8px; border: 2px solid var(--abyss-ring-soft); background: var(--abyss-paper);
+  font: 11px var(--font-mono); color: var(--abyss-ink-text);
+}
+.attached { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.attached li {
+  display: flex; align-items: center; gap: 6px; padding: 4px 6px; background: var(--abyss-paper);
+  border: 2px solid var(--abyss-parchment-edge); border-radius: 4px; font: 11px var(--font-mono);
+}
+.attached li span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attached li em { color: var(--abyss-brown-soft); font-size: 10px; font-style: normal; }
+.attached li button { padding: 0 6px; border: 0; background: none; cursor: pointer; font-size: 13px; color: var(--abyss-rust); }
+
+/* ---- vendor track record ---- */
+.stats-card { margin: 8px 0; padding: 8px 10px; background: var(--abyss-paper); border: 2px solid var(--abyss-parchment-edge); border-radius: 4px; }
+.stats-card dl { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 0 0 8px; }
+.stats-card dl div { display: grid; gap: 1px; }
+.stats-card dt { color: var(--abyss-brown-soft); font: 8px var(--font-pixel); }
+.stats-card dd { margin: 0; color: var(--abyss-ink-text); font: 700 15px var(--font-mono); }
+.stats-card dd.good { color: #1c6b28; }
+.stats-card dd.bad { color: #a0281b; }
+.stats-card small { color: var(--abyss-brown-soft); font: 9px var(--font-mono); }
+.rep-history { display: grid; gap: 4px; }
+.rep-row { display: grid; grid-template-columns: 70px 1fr 38px; align-items: center; gap: 6px; }
+.rep-row svg { width: 100%; height: 30px; }
+.rep-row polyline { fill: none; stroke-width: 2; }
+.rep-row .baseline { stroke: var(--abyss-parchment-edge); stroke-dasharray: 3 3; }
+.rep-row strong { font: 11px var(--font-mono); text-align: right; }

@@ -54,10 +54,16 @@ class LedgerEntry:
 
 
 class Ledger:
-    def __init__(self, job_id: str, path: Path | None):
+    def __init__(self, job_id: str, path: Path | None, budget_usd: float | None = None):
         self.job_id = job_id
         self.path = path
+        # A hard cap for the whole job: the LLM gateway refuses calls (and caps
+        # each call's output tokens) so recorded spend never passes it.
+        self.budget_usd = budget_usd
         self._entries: list[LedgerEntry] = []
+
+    def remaining_usd(self) -> float | None:
+        return None if self.budget_usd is None else self.budget_usd - self.total_cost()
 
     def record(self, **fields: object) -> LedgerEntry:
         entry = LedgerEntry(

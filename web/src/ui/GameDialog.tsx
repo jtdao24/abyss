@@ -3,7 +3,7 @@
 // be steered. The terminal chat (python -m abyss.chat) still works alongside.
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
-import { api, type Estimate, type Provider, type SessionRecord, type SessionSummary } from "../api";
+import { api, type Attachment, type Estimate, type Provider, type SessionRecord, type SessionSummary, type VendorStats } from "../api";
 import type { AgentId, ClientMsg, TaskType } from "../contract";
 import { VENDOR, formatCents } from "../scene/model";
 import type { InteractId } from "../scene/world";
@@ -105,11 +105,26 @@ function TaskRow({ task }: { task: TaskView }) {
   );
 }
 
+/** One-click recipes: fill the job box; edit the [bracketed] parts. */
+const TEMPLATES: { label: string; job: string }[] = [
+  { label: "Research + brief", job: "Research [topic] and write a 200-word brief for a busy reader, with the 3 key facts and sources." },
+  { label: "Fact-check this", job: "Fact-check the following text. List every claim that is wrong or unsupported, with a correction:\n\n[paste the text]" },
+  { label: "Summarize my file", job: "Summarize the attached material in 8 bullet points, then list 3 open questions it raises." },
+  { label: "Compare options", job: "Compare [option A] and [option B] for [goal]: a pros and cons table, then a one-paragraph recommendation." },
+  { label: "Plan a trip", job: "Plan a [N]-day trip to [place] for [who] under [budget]: a day-by-day plan with costs." },
+  { label: "Write code", job: "Write a Python function that [does something], with a docstring and three example calls. Then check it for bugs." },
+];
+
 function NewSession({ state, send, providers }: Pick<GameDialogProps, "state" | "send" | "providers">) {
   const [job, setJob] = useState("");
   const [picked, setPicked] = useState<string | null>(null);
   const [budget, setBudget] = useState("");
   const [estimate, setEstimate] = useState<Estimate | null>(null);
+  const [attached, setAttached] = useState<Attachment[]>([]);
+  const [link, setLink] = useState("");
+  const [attaching, setAttaching] = useState(false);
+  const [attachError, setAttachError] = useState<string | null>(null);
+  const fileInput = useRef<HTMLInputElement | null>(null);
   const refusal = useLastRefusal(state);
   const choices = providers ?? [];
   const provider = picked ?? choices[0]?.id ?? null;
@@ -123,6 +138,19 @@ function NewSession({ state, send, providers }: Pick<GameDialogProps, "state" | 
     };
   }, [provider]);
 
+  const attach = async (make: () => Promise<Attachment>) => {
+    setAttaching(true);
+    setAttachError(null);
+    try {
+      const added = await make();
+      setAttached((list) => [...list.filter((a) => a.id !== added.id), added].slice(0, 5));
+    } catch (error) {
+      setAttachError(error instanceof Error ? error.message : "couldn't add that");
+    } finally {
+      setAttaching(false);
+    }
+  };
+
   if (!send) return <p className="rpg-hint">This is a replay, so new sessions can't start here.</p>;
   if (state.jobActive) return <p className="rpg-hint">The crew is on the current session. Start a new one when it finishes.</p>;
   const budgetUsd = budget.trim() ? Number(budget) : null;
@@ -135,8 +163,12 @@ function NewSession({ state, send, providers }: Pick<GameDialogProps, "state" | 
       job: text,
       ...(provider && choices.length > 1 ? { provider } : {}),
       ...(budgetUsd !== null ? { budget_usd: budgetUsd } : {}),
+      ...(attached.length ? { attachments: attached.map((a) => a.id) } : {}),
     };
-    if (send(message)) setJob("");
+    if (send(message)) {
+      setJob("");
+      setAttached([]);
+    }
   };
   const overBudget = estimate && budgetUsd !== null && budgetUsd < estimate.low_usd;
   return (
@@ -147,6 +179,13 @@ function NewSession({ state, send, providers }: Pick<GameDialogProps, "state" | 
         start();
       }}
     >
+      <div className="template-row" aria-label="Templates">
+        {TEMPLATES.map((t) => (
+          <button key={t.label} type="button" className="chip" onClick={() => setJob(t.job)} title={t.job}>
+            {t.label}
+          </button>
+        ))}
+      </div>
       <label htmlFor="session-job">What do you need?</label>
       <textarea
         id="session-job"
@@ -162,6 +201,55 @@ function NewSession({ state, send, providers }: Pick<GameDialogProps, "state" | 
           }
         }}
       />
+      <div className="attach-row">
+        <input
+          ref={fileInput}
+          type="file"
+          hidden
+          accept=".pdf,.txt,.md,.csv,.tsv,.json,.log"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            e.target.value = "";
+            if (file) void attach(() => api.attachFile(file));
+          }}
+        />
+        <button type="button" className="chip" disabled={attaching || attached.length >= 5} onClick={() => fileInput.current?.click()}>
+          + File
+        </button>
+        <input
+          className="link-input"
+          value={link}
+          placeholder="https://… link for the vendors to read"
+          onChange={(e) => setLink(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              if (link.trim()) void attach(() => api.attachLink(link.trim())).then(() => setLink(""));
+            }
+          }}
+        />
+        <button
+          type="button"
+          className="chip"
+          disabled={attaching || !link.trim() || attached.length >= 5}
+          onClick={() => void attach(() => api.attachLink(link.trim())).then(() => setLink(""))}
+        >
+          + Link
+        </button>
+      </div>
+      {attaching && <p className="rpg-hint">Reading it…</p>}
+      {attachError && <p className="form-error">{attachError}</p>}
+      {attached.length > 0 && (
+        <ul className="attached">
+          {attached.map((a) => (
+            <li key={a.id} title={a.preview}>
+              <span>{a.kind === "link" ? "🔗" : "📄"} {a.name}</span>
+              <em>{a.chars.toLocaleString()} chars</em>
+              <button type="button" aria-label={`Remove ${a.name}`} onClick={() => setAttached((list) => list.filter((x) => x.id !== a.id))}>×</button>
+            </li>
+          ))}
+        </ul>
+      )}
       {choices.length > 1 && (
         <div className="segmented" role="radiogroup" aria-label="AI for this session">
           {choices.map((p) => (
@@ -191,7 +279,7 @@ function NewSession({ state, send, providers }: Pick<GameDialogProps, "state" | 
       {!budgetOk && <p className="form-error">A budget is between $0.0001 and $100.</p>}
       {overBudget && <p className="rpg-hint">That cap is below the usual cost, so the crew may stop after the first task.</p>}
       {budgetUsd !== null && budgetOk && (
-        <p className="rpg-hint">Once the cap is reached no new task starts; the task in progress and the final packaging still finish.</p>
+        <p className="rpg-hint">A hard cap: every AI call is sized to what's left, and the crew stops the moment the budget runs out.</p>
       )}
       <button type="submit" className="btn-primary" disabled={!job.trim() || !state.connected || !budgetOk}>
         {state.connected ? "Start session" : "Connecting…"}
@@ -289,6 +377,53 @@ function vendorActivity(state: MarketState, agentId: AgentId): { line: string; t
   return { line: state.jobActive ? "Waiting for the next task" : "Waiting for a job", task: null };
 }
 
+/** A vendor's record across every saved session. */
+function VendorStatsCard({ agentId, color }: { agentId: AgentId; color: string }) {
+  const [stats, setStats] = useState<VendorStats | null | "error">(null);
+  useEffect(() => {
+    api.vendors().then((all) => setStats(all.vendors[agentId] ?? "error")).catch(() => setStats("error"));
+  }, [agentId]);
+  if (stats === null) return <p className="rpg-hint">Loading stats…</p>;
+  if (stats === "error") return null;
+  if (!stats.bids && !stats.wins) return <p className="rpg-hint">No sessions yet: stats show up after this vendor's first bid.</p>;
+  const gap = stats.avg_grade != null && stats.avg_promised != null ? stats.avg_grade - stats.avg_promised : null;
+  return (
+    <section className="stats-card">
+      <h3>Track record</h3>
+      <dl>
+        <div><dt>Win rate</dt><dd>{stats.win_rate != null ? `${Math.round(stats.win_rate * 100)}%` : "—"}</dd><small>{stats.wins} of {stats.bids} bids</small></div>
+        <div><dt>Avg grade</dt><dd>{stats.avg_grade != null ? stats.avg_grade.toFixed(1) : "—"}</dd><small>promised {stats.avg_promised != null ? stats.avg_promised.toFixed(1) : "—"}</small></div>
+        <div>
+          <dt>Promises</dt>
+          <dd className={gap == null ? "" : gap >= -0.25 ? "good" : "bad"}>{gap == null ? "—" : gap >= -0.25 ? "Kept" : "Over"}</dd>
+          <small>{gap == null ? "" : `${gap >= 0 ? "+" : ""}${gap.toFixed(1)} vs promise`}</small>
+        </div>
+      </dl>
+      <div className="rep-history">
+        {TYPES.map((type) => {
+          const points = stats.history[type] ?? [];
+          const values = [1, ...points.map((p) => p.value)]; // everyone starts at 1.00
+          const w = 120;
+          const h = 30;
+          const x = (i: number) => (values.length > 1 ? (i / (values.length - 1)) * (w - 4) + 2 : w / 2);
+          const y = (v: number) => h - 2 - (Math.min(2, Math.max(0, v)) / 2) * (h - 4);
+          return (
+            <div key={type} className="rep-row">
+              <span className={`type-chip ${type}`}>{type}</span>
+              <svg viewBox={`0 0 ${w} ${h}`} role="img" aria-label={`${type} reputation over time`}>
+                <line x1="0" x2={w} y1={y(1)} y2={y(1)} className="baseline" />
+                <polyline points={values.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ")} style={{ stroke: color }} />
+              </svg>
+              <strong>{(stats.reputation[type] ?? values[values.length - 1]).toFixed(2)}</strong>
+            </div>
+          );
+        })}
+      </div>
+      <p className="rpg-hint">Reputation over time per task type (the line at 1.00 = keeps its promises).</p>
+    </section>
+  );
+}
+
 function VendorDialog({ state, onClose, agentId, send }: GameDialogProps & { agentId: AgentId }) {
   const agent = state.agents[agentId];
   const vendor = VENDOR[agentId];
@@ -327,6 +462,7 @@ function VendorDialog({ state, onClose, agentId, send }: GameDialogProps & { age
         </>
       )}
       <p className="rpg-hint">Spent ${(stats?.cost_usd ?? 0).toFixed(5)} on {stats?.calls ?? 0} calls this job.</p>
+      <VendorStatsCard agentId={agentId} color={vendor.color} />
       <h3>Reputation</h3>
       <ul className="rep-lines">
         {TYPES.map((type) => {

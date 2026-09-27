@@ -15,7 +15,11 @@ def guidance_text(notes: list[str]) -> str:
 
 
 def build_work_prompt(
-    job_text: str, task: TaskSpec, dep_outputs: dict[str, str], notes: list[str] | None = None
+    job_text: str,
+    task: TaskSpec,
+    dep_outputs: dict[str, str],
+    notes: list[str] | None = None,
+    context: str | None = None,
 ) -> tuple[str, str]:
     dependencies = _dependency_text(task, dep_outputs)
     system = prompts.WORK_SYSTEM[task.type]
@@ -25,6 +29,8 @@ def build_work_prompt(
         brief=task.brief,
         dependencies=dependencies,
     )
+    if context:
+        user += prompts.WORK_CONTEXT.format(context=context)
     if notes:
         user += prompts.WORK_GUIDANCE.format(notes=guidance_text(notes))
     return system, user
@@ -76,8 +82,9 @@ async def do_work(
     task: TaskSpec,
     dep_outputs: dict[str, str],
     notes: list[str] | None = None,
+    context: str | None = None,
 ) -> tuple[str, dict]:
-    system, user = build_work_prompt(job_text, task, dep_outputs, notes)
+    system, user = build_work_prompt(job_text, task, dep_outputs, notes, context)
     result = await llm.call(
         ledger=ledger,
         purpose="work",

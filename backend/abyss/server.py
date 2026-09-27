@@ -12,17 +12,17 @@ import contextlib
 import json
 import logging
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 
-from . import config
+from . import attachments, config
 from .contract import validate_event
 from .events import EventStream, hello_data
 from .llm import LLM
 from .market import Guidance, run_job
 from .reputation import ReputationStore
 from .estimate import estimate_session
-from .sessions import SessionStore, usage_summary
+from .sessions import SessionStore, usage_summary, vendor_stats
 
 
 logger = logging.getLogger(__name__)
@@ -87,13 +87,19 @@ class Market:
         await ws.send_json(self.stream.stamp("error", {"message": message, "task_id": None, "fatal": False}, job_id=None))
 
     def start(
-        self, job: str, price_weight: float, provider: str | None = None, budget_usd: float | None = None
+        self,
+        job: str,
+        price_weight: float,
+        provider: str | None = None,
+        budget_usd: float | None = None,
+        attachment_ids: list[str] | None = None,
     ) -> None:
         self.backlog = []
         self.guidance = Guidance()
-        sessions.expect(job, provider, budget_usd)
+        context, names = attachments.context_for(attachment_ids or [])
+        sessions.expect(job, provider, budget_usd, names)
         self.running = asyncio.create_task(
-            self._run(job, price_weight, self.guidance, llm_for(provider), budget_usd)
+            self._run(job, price_weight, self.guidance, llm_for(provider), budget_usd, context, names)
         )
 
     async def _run(
@@ -103,12 +109,14 @@ class Market:
         guidance: Guidance,
         job_llm: LLM | None = None,
         budget_usd: float | None = None,
+        context: str | None = None,
+        context_names: list[str] | None = None,
     ) -> None:
         # A crashed job must tell everyone instead of leaving them waiting forever.
         try:
             await run_job(
                 job, stream=self.stream, llm=job_llm or llm, rep=reputation, price_weight=price_weight,
-                guidance=guidance, budget_usd=budget_usd,
+                guidance=guidance, budget_usd=budget_usd, context=context or None, context_names=context_names or None,
             )
         except Exception as exc:
             logger.exception("job crashed")
@@ -167,6 +175,28 @@ async def api_usage() -> dict:
     return usage_summary(sessions)
 
 
+@app.post("/api/attachments")
+async def api_attach(request: Request) -> dict:
+    """Add a file ({name, data_base64}) or a link ({url}) as reference material."""
+    try:
+        body = await request.json()
+    except ValueError:
+        raise HTTPException(400, "send JSON: {name, data_base64} or {url}")
+    if not isinstance(body, dict):
+        raise HTTPException(400, "send JSON: {name, data_base64} or {url}")
+    try:
+        record = await attachments.create(body)
+    except attachments.AttachmentError as exc:
+        raise HTTPException(400, str(exc))
+    return attachments.public(record)
+
+
+@app.get("/api/vendors")
+async def api_vendors() -> dict:
+    """Each vendor across every saved session: wins, grades vs promises, reputation over time."""
+    return vendor_stats(sessions, reputation.snapshot())
+
+
 @app.get("/api/estimate")
 async def api_estimate(provider: str | None = None) -> dict:
     """What a typical session will cost on this AI, before starting it (no calls)."""
@@ -200,6 +230,7 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                     message.get("price_weight", config.PRICE_WEIGHT),
                     message.get("provider"),
                     message.get("budget_usd"),
+                    message.get("attachments"),
                 )
             elif message_type == "steer":
                 error = _validate_steer(message)
@@ -253,6 +284,12 @@ def _validate_start(message: dict) -> str | None:
         isinstance(budget, bool) or not isinstance(budget, (int, float)) or not 0 < budget <= 100
     ):
         return "budget_usd must be more than $0 and at most $100"
+    ids = message.get("attachments")
+    if ids is not None:
+        if not isinstance(ids, list) or len(ids) > attachments.MAX_ATTACHMENTS:
+            return f"attachments must be a list of at most {attachments.MAX_ATTACHMENTS} ids"
+        if any(not isinstance(i, str) or attachments.load(i) is None for i in ids):
+            return "an attachment is missing; add the file or link again"
     return None
 
 
