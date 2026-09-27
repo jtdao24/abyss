@@ -19,6 +19,7 @@ import {
 import { sfx } from "../audio/sfx";
 import type { AgentId, TaskType } from "../contract";
 import { Ambient, type AmbientData } from "./ambient";
+import { daylightFor, mixColor, type Daylight, type TimeMode } from "./daylight";
 import { fitScale } from "./fit";
 import { THEME } from "../theme";
 import type { MarketState } from "../state/reducer";
@@ -55,6 +56,9 @@ const PANEL_SHARE = 0.42; // bottom share of the stage covered by the focus pane
 const CALM =
   new URLSearchParams(window.location.search).get("calm") === "1" ||
   (typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+const FIREFLIES = 16;             // at full night
+const DAYLIGHT_EVERY_MS = 60_000; // on auto, how often the light follows the clock
+const ease = (p: number) => p * p * (3 - 2 * p);
 
 export const PALETTE = {
   ink: THEME.inkDark,
@@ -205,6 +209,18 @@ export class MarketScene {
   private cam = { scale: 1, x: 0, y: 0 };
   private focused: InteractId | null = null;
   private watchdog: number | null = null;
+  /** Day and night: a colour multiplied over the world, and lights drawn on top of it. */
+  private readonly nightShade = new Graphics();
+  private readonly lights = new Container();
+  private readonly lampGlows: { g: Graphics; phase: number }[] = [];
+  private readonly fireflies: { g: Graphics; age: number; life: number; x0: number; y0: number; phase: number }[] = [];
+  private timeMode: TimeMode = "auto";
+  private light: Daylight = daylightFor("auto");
+  private lightFrom: Daylight = this.light;
+  private lightTarget: Daylight = this.light;
+  /** Progress of the fade from `lightFrom` to `lightTarget`, 0 to 1. */
+  private lightFade = 1;
+  private lightClock = 0;
 
   private constructor(el: HTMLElement, app: Application) {
     this.el = el;
@@ -260,7 +276,7 @@ export class MarketScene {
       UPDATE_PRIORITY.LOW,
     );
     scene.ambient = new Ambient(backdrop, water, foliage, ambient, WORLD.w, !CALM);
-    scene.build(backdrop, people);
+    scene.build(backdrop, people, ambient.lanterns);
     el.appendChild(app.canvas);
     app.canvas.classList.add("market-canvas");
     app.canvas.setAttribute("role", "img");
@@ -319,6 +335,24 @@ export class MarketScene {
     const dest = standable(target);
     this.walk = route({ x: this.player.x, y: this.player.y }, dest);
     this.onArrive = then;
+  }
+
+  /** Follow the clock ("auto") or pin the boardwalk to day or night. The light fades over unless `instant`. */
+  setTimeMode(mode: TimeMode, instant = false): void {
+    this.timeMode = mode;
+    this.lightClock = 0;
+    this.fadeTo(daylightFor(mode));
+    if (instant) {
+      this.light = this.lightTarget;
+      this.lightFade = 1;
+      this.applyLight();
+    }
+  }
+
+  private fadeTo(target: Daylight): void {
+    this.lightFrom = { ...this.light };
+    this.lightTarget = target;
+    this.lightFade = 0;
   }
 
   /** Zoom the camera onto a person or stall (null zooms back out). */
@@ -416,7 +450,7 @@ export class MarketScene {
     return s;
   }
 
-  private build(backdrop: Texture, people: Record<(typeof SPRITES)[number], Texture>): void {
+  private build(backdrop: Texture, people: Record<(typeof SPRITES)[number], Texture>, lanterns: [number, number][]): void {
     this.app.stage.addChild(this.world);
     this.world.addChild(new Sprite(backdrop), this.ambient.back, this.clickRing, this.hover);
 
@@ -430,6 +464,24 @@ export class MarketScene {
     }
     this.player = this.person(people.player, PLAYER_START);
     this.world.addChild(this.ambient.front, this.actors);
+
+    // Night falls over the art and the people, but not the bubbles and HUD above.
+    this.nightShade.rect(0, 0, WORLD.w, WORLD.h).fill("#ffffff");
+    this.nightShade.blendMode = "multiply";
+    this.lights.blendMode = "add";
+    for (const [x, y] of lanterns) {
+      // stepped rings rather than a smooth gradient, to keep the pixel look
+      const g = new Graphics()
+        .circle(0, 0, 70).fill({ color: "#ff9a3c", alpha: 0.07 })
+        .circle(0, 0, 48).fill({ color: "#ffb347", alpha: 0.09 })
+        .circle(0, 0, 28).fill({ color: "#ffd27a", alpha: 0.14 })
+        .circle(0, 0, 12).fill({ color: "#fff0c0", alpha: 0.3 });
+      g.position.set(x, y);
+      this.lights.addChild(g);
+      this.lampGlows.push({ g, phase: Math.random() * 10 });
+    }
+    this.world.addChild(this.nightShade, this.lights);
+    this.applyLight();
 
     const bubbles = new Container();
     for (const agentId of AGENT_ORDER) {
@@ -550,6 +602,7 @@ export class MarketScene {
       this.pendingHover = null;
     }
     this.ambient.update(ticker);
+    this.stepLight(ticker.deltaMS);
     this.stepPlayer(ticker.deltaMS);
     // the main agent rides the boat's gentle bob
     this.mainAgent.y = MAIN_AGENT_POS.y + Math.sin(this.clock / 900) * 1.5;
@@ -567,6 +620,64 @@ export class MarketScene {
       this.clickRing.clear().ellipse(0, 0, 10 + 12 * p, 4 + 5 * p).stroke({ width: 2, color: PALETTE.paper, alpha: 1 - p });
     }
   };
+
+  // ------------------------------------------------------------ day and night
+  private stepLight(deltaMs: number): void {
+    this.lightClock += deltaMs;
+    if (this.timeMode === "auto" && this.lightClock >= DAYLIGHT_EVERY_MS) {
+      this.lightClock = 0;
+      this.fadeTo(daylightFor("auto"));
+    }
+    if (this.lightFade < 1) {
+      this.lightFade = Math.min(1, this.lightFade + deltaMs / 1800);
+      const t = ease(this.lightFade);
+      this.light = {
+        tint: mixColor(this.lightFrom.tint, this.lightTarget.tint, t),
+        lamps: this.lightFrom.lamps + (this.lightTarget.lamps - this.lightFrom.lamps) * t,
+      };
+      this.applyLight();
+    }
+
+    const lamps = this.light.lamps;
+    if (lamps <= 0.01 && this.fireflies.length === 0) return;
+    for (const { g, phase } of this.lampGlows) {
+      const flicker = 0.85 + 0.1 * Math.sin(this.clock / 190 + phase) + 0.05 * Math.sin(this.clock / 61 + phase * 3);
+      g.alpha = lamps * flicker;
+    }
+
+    // fireflies come out once it's properly dark (not with reduced motion or ?calm=1)
+    const wanted = CALM ? 0 : Math.round(FIREFLIES * Math.max(0, (lamps - 0.4) / 0.6));
+    if (this.fireflies.length < wanted && Math.random() < deltaMs / 250) this.spawnFirefly();
+    for (let i = this.fireflies.length - 1; i >= 0; i -= 1) {
+      const fly = this.fireflies[i];
+      fly.age += deltaMs;
+      const p = fly.age / fly.life;
+      fly.g.x = fly.x0 + Math.sin(fly.age / 900 + fly.phase) * 40 + p * 30;
+      fly.g.y = fly.y0 + Math.sin(fly.age / 650 + fly.phase * 2) * 18 - p * 25;
+      const blink = Math.max(0, Math.sin(fly.age / 420 + fly.phase));
+      fly.g.alpha = blink * Math.min(1, lamps * 1.5) * (p < 0.1 ? p * 10 : p > 0.9 ? (1 - p) * 10 : 1);
+      if (p >= 1) {
+        fly.g.destroy();
+        this.fireflies.splice(i, 1);
+      }
+    }
+  }
+
+  private spawnFirefly(): void {
+    const g = new Graphics().rect(-3, -3, 6, 6).fill({ color: "#d8ff7a", alpha: 0.25 }).rect(-1, -1, 3, 3).fill("#f4ffb8");
+    const x0 = 40 + Math.random() * (WORLD.w - 80);
+    const y0 = 80 + Math.random() * (WORLD.h - 140);
+    g.position.set(x0, y0);
+    g.alpha = 0;
+    this.lights.addChild(g);
+    this.fireflies.push({ g, age: 0, life: 6000 + Math.random() * 6000, x0, y0, phase: Math.random() * 10 });
+  }
+
+  private applyLight(): void {
+    this.nightShade.tint = this.light.tint;
+    this.nightShade.visible = this.light.tint !== "#ffffff";
+    this.lights.visible = this.light.lamps > 0.01 || this.fireflies.length > 0;
+  }
 
   /** Keyboard walking: a key press cancels a click-walk; walls are slid along, not walked through. */
   private stepWithKeys(deltaMs: number): void {
