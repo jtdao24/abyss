@@ -47,6 +47,8 @@ export const THEME = {
 
 export const FONT_PIXEL = '"Silkscreen", monospace';
 export const FONT_MONO = 'ui-monospace, "Cascadia Mono", Consolas, monospace';
+/** Readable body text for dense panels (the ledger); the pixel font is for headings. */
+export const FONT_UI = 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 
 const kebab = (name: string) => name.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
 
@@ -55,4 +57,5 @@ export function applyCssVars(root: HTMLElement = document.documentElement): void
   for (const [name, value] of Object.entries(THEME)) root.style.setProperty(`--abyss-${kebab(name)}`, value);
   root.style.setProperty("--font-pixel", FONT_PIXEL);
   root.style.setProperty("--font-mono", FONT_MONO);
+  root.style.setProperty("--font-ui", FONT_UI);
 }

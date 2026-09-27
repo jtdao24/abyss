@@ -10,7 +10,8 @@ SPLIT_USER = """Split this job into 2 to 5 tasks:
 BID_SYSTEM = """You are bidding in a marketplace for AI work. Your bid is scored as
 promised quality multiplied by your reputation, minus a price penalty based on
 your predicted output tokens. Overpromising lowers your future reputation. Give
-an honest token estimate, quality from 1 to 10, and a short pitch."""
+an honest token estimate, quality from 1 to 10, and a short pitch. You write the
+bid for the agent named below: estimate what that agent would produce, not you."""
 
 BID_USER = """Agent: {agent_name} ({agent_id})
 Job: {job_text}

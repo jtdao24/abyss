@@ -55,9 +55,13 @@ class EventStream:
 
 
 def hello_data(rep: ReputationStore) -> dict:
+    # The stalls as they run for the default AI (e.g. GPT-5 mini / GPT-5).
+    agents = config.agents_for()
+    orchestrator = config.tier_model(config.ORCHESTRATOR_MODEL)
+    reviewer = config.tier_model(config.REVIEWER_MODEL)
+    models = {agent["model"] for agent in agents} | {orchestrator, reviewer}
     return {
-        # The stalls as they run for the default AI (e.g. GPT-5 mini / GPT-5).
-        "agents": config.agents_for(),
+        "agents": agents,
         "reputation": rep.snapshot(),
         "config": {
             "price_weight": config.PRICE_WEIGHT,
@@ -66,8 +70,10 @@ def hello_data(rep: ReputationStore) -> dict:
             "task_types": config.TASK_TYPES,
             "real_models": config.real_models(),
             "fake_llm": config.fake_llm(),
-            "orchestrator_model": config.tier_model(config.ORCHESTRATOR_MODEL),
-            "reviewer_model": config.tier_model(config.REVIEWER_MODEL),
+            "orchestrator_model": orchestrator,
+            "reviewer_model": reviewer,
+            # Lets the page price "what if the premium stall did every task".
+            "prices": {m: list(config.PRICES.get(m, config.FALLBACK_PRICE)) for m in sorted(models)},
         },
     }
 

@@ -67,6 +67,14 @@ ASSEMBLE_EFFORT = "medium"
 
 ORCHESTRATOR_MODEL = "standard"  # the main agent's tier
 REVIEWER_MODEL = "standard"
+# Every stall's bid is written by this tier. A bid is only a quote, and the market
+# still prices it at the stall's own model, so the premium model is paid only
+# for work it wins (on OpenAI, Astra bids cost more than all the Luna work).
+BID_MODEL = "budget"
+# The premium stall is a backup. It only bids on a task type once every cheaper
+# stall's reputation there is below this (they keep delivering less than they
+# promise), or when every cheaper bid fails. At price weight 0 it always bids.
+PREMIUM_BACKUP_BELOW = float(os.getenv("ABYSS_PREMIUM_BACKUP_BELOW", "0.9"))
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -109,7 +117,10 @@ def resolve_model(nominal: str) -> str:
 # Agents keep their identities (stalls, bids, reputation); each tier is served
 # by the provider's model below, overridable per tier with env vars.
 OPENAI_PRICES: dict[str, tuple[float, float]] = {
-    # USD per million input / output tokens.
+    # USD per million input / output tokens (standard tier, September 2026).
+    "gpt-6-luna": (0.10, 0.50),
+    "gpt-6-sol": (2.00, 10.00),
+    "gpt-6-astra": (10.00, 50.00),
     "gpt-5-nano": (0.05, 0.40),
     "gpt-5-mini": (0.25, 2.00),
     "gpt-5": (1.25, 10.00),
@@ -142,6 +153,9 @@ def provider() -> str:
 
 
 MODEL_LABELS = {
+    "gpt-6-luna": "GPT-6 Luna",
+    "gpt-6-sol": "GPT-6 Sol",
+    "gpt-6-astra": "GPT-6 Astra",
     "gpt-5-nano": "GPT-5 nano",
     "gpt-5-mini": "GPT-5 mini",
     "gpt-5": "GPT-5",
@@ -191,9 +205,9 @@ def provider_tiers(name: str) -> dict[str, str]:
             "premium": os.getenv("ABYSS_META_TOP", "muse-spark-1.3"),
         }
     return {
-        "budget": os.getenv("ABYSS_OPENAI_CHEAP", "gpt-5-mini"),
-        "standard": os.getenv("ABYSS_OPENAI_MID", "gpt-5"),
-        "premium": os.getenv("ABYSS_OPENAI_TOP", "gpt-5"),
+        "budget": os.getenv("ABYSS_OPENAI_CHEAP", "gpt-6-luna"),
+        "standard": os.getenv("ABYSS_OPENAI_MID", "gpt-6-sol"),
+        "premium": os.getenv("ABYSS_OPENAI_TOP", "gpt-6-astra"),
     }
 
 

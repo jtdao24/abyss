@@ -115,7 +115,10 @@ def test_vendor_stats_add_up_across_sessions(server) -> None:
     assert stats["sessions"] == 2
     total_wins = sum(v["wins"] for v in vendors.values())
     assert total_wins == 6  # 3 tasks x 2 sessions, one winner each
-    assert all(v["bids"] == 6 for v in vendors.values())  # every vendor bid on every task
+    # The two cheaper vendors bid on every task; the premium one is a backup and
+    # stays on standby while they're trusted (a standby isn't a bid).
+    assert vendors["haiku"]["bids"] == 6 and vendors["sonnet"]["bids"] == 6
+    assert vendors["opus"]["bids"] == 0 and vendors["opus"]["wins"] == 0
     for v in vendors.values():
         if v["wins"]:
             assert 0 < v["win_rate"] <= 1 and 1 <= v["avg_grade"] <= 10

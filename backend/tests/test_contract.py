@@ -102,11 +102,9 @@ def test_fixture_passes(fixture_events: list[dict]) -> None:
 
 def test_one_failed_bid_allows_auction_to_continue(fixture_events: list[dict]) -> None:
     changed = deepcopy(fixture_events)
-    won = next(
-        event
-        for event in changed
-        if event["type"] == "won" and event["data"]["task_id"] == "t1"
-    )
+    # A task all three stalls bid on (the premium stall sits some out on standby).
+    won = next(event for event in changed if event["type"] == "won" and len(event["data"]["scores"]) == 3)
+    task_id = won["data"]["task_id"]
     # Fail a bid that didn't win (whoever that is in the recording).
     loser = next(agent for agent in won["data"]["scores"] if agent != won["data"]["agent_id"]
                  and agent != won["data"]["runner_up_agent_id"])
@@ -114,7 +112,7 @@ def test_one_failed_bid_allows_auction_to_continue(fixture_events: list[dict]) -
         event
         for event in changed
         if event["type"] == "bid"
-        and event["data"]["task_id"] == "t1"
+        and event["data"]["task_id"] == task_id
         and event["data"]["agent_id"] == loser
     )
     _make_bid_fail(bid)

@@ -13,7 +13,7 @@ from .llm import LLM, MIN_BUDGET_TOKENS, BudgetExceeded, LLMError
 from .orchestrator import TaskSpec, split_job
 from .reputation import ReputationStore
 from .reviewer import review
-from .scoring import ScoredBid, clamp_bid, pick_winner, predicted_cost, score_bid
+from .scoring import STANDBY, ScoredBid, clamp_bid, pick_winner, predicted_cost, premium_on_standby, score_bid
 
 
 @dataclass
@@ -329,31 +329,36 @@ async def _run_auction(
     tasks_won: dict[str, int],
 ) -> tuple[config.AgentSpec, int, int, float] | None:
     dep_sizes = {task_id: len(output) for task_id, output in dep_outputs.items()}
-    calls = [
-        request_bid(
-            llm,
-            ledger,
-            agent,
-            job_text,
-            task,
-            dep_sizes,
-            rep.get(agent.agent_id, task.type),
-        )
-        for agent in config.AGENTS
-    ]
-    results = await asyncio.gather(*calls, return_exceptions=True)
+
+    async def bids_from(bidders: list[config.AgentSpec]) -> dict[str, object]:
+        calls = [
+            request_bid(llm, ledger, agent, job_text, task, dep_sizes, rep.get(agent.agent_id, task.type))
+            for agent in bidders
+        ]
+        results = await asyncio.gather(*calls, return_exceptions=True)
+        return {agent.agent_id: result for agent, result in zip(bidders, results)}
+
+    premium = [agent for agent in config.AGENTS if agent.model == "premium"]
+    cheaper = [agent for agent in config.AGENTS if agent.model != "premium"]
+    standby = premium_on_standby(
+        [rep.get(agent.agent_id, task.type) for agent in cheaper], price_weight, config.PREMIUM_BACKUP_BELOW
+    )
+    results = await bids_from(cheaper if standby else config.AGENTS)
+    if standby and all(isinstance(result, BaseException) for result in results.values()):
+        results |= await bids_from(premium)  # nobody cheaper can take it: the backup steps in
     scored: list[ScoredBid] = []
     agents = {agent.agent_id: agent for agent in config.AGENTS}
 
-    for agent, result in zip(config.AGENTS, results):
-        if isinstance(result, BaseException):
+    for agent in config.AGENTS:
+        result = results.get(agent.agent_id, STANDBY)
+        if result is STANDBY or isinstance(result, BaseException):
             await stream.emit(
                 "bid",
                 {
                     "task_id": task.task_id,
                     "agent_id": agent.agent_id,
                     "ok": False,
-                    "error": str(result),
+                    "error": result if result is STANDBY else str(result),
                     "predicted_output_tokens": None,
                     "est_input_tokens": None,
                     "predicted_cost_usd": None,

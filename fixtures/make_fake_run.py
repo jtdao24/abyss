@@ -12,21 +12,23 @@ import json
 from pathlib import Path
 
 PRICES = {  # USD per 1M tokens: (input, output) — OpenAI, the default AI
-    "gpt-5-mini": (0.25, 2.00),
-    "gpt-5": (1.25, 10.00),
+    "gpt-6-luna": (0.10, 0.50),
+    "gpt-6-sol": (2.00, 10.00),
+    "gpt-6-astra": (10.00, 50.00),
 }
 AGENTS = [
-    {"agent_id": "haiku", "display_name": "GPT-5 mini", "model": "gpt-5-mini", "color": "#4fb3a9"},
-    {"agent_id": "sonnet", "display_name": "GPT-5", "model": "gpt-5", "color": "#e8a33d"},
-    {"agent_id": "opus", "display_name": "GPT-5", "model": "gpt-5", "color": "#8e6cc9"},
+    {"agent_id": "haiku", "display_name": "GPT-6 Luna", "model": "gpt-6-luna", "color": "#4fb3a9"},
+    {"agent_id": "sonnet", "display_name": "GPT-6 Sol", "model": "gpt-6-sol", "color": "#e8a33d"},
+    {"agent_id": "opus", "display_name": "GPT-6 Astra", "model": "gpt-6-astra", "color": "#8e6cc9"},
 ]
 AGENT_MODEL = {a["agent_id"]: a["model"] for a in AGENTS}
 TASK_TYPES = ["research", "writing", "checking"]
 PRICE_WEIGHT = 1.0
 REP_INIT = 1.0
 REP_ALPHA = 0.3
-ORCH_MODEL = "gpt-5"
-REVIEW_MODEL = "gpt-5"
+ORCH_MODEL = "gpt-6-sol"  # the standard tier
+BID_MODEL = "gpt-6-luna"  # the budget tier writes every stall's bid
+REVIEW_MODEL = "gpt-6-sol"
 JOB_ID = "j_7f3a91c2"
 JOB_TEXT = (
     "Write a short explainer (under 150 words) on why most coasts get two "
@@ -56,6 +58,12 @@ def score(q: int, rep: float, pred_cost: float) -> float:
 events: list[dict] = []
 ledger: list[dict] = []  # {purpose, agent_id, task_id, usage}
 rep = {a["agent_id"]: {t: REP_INIT for t in TASK_TYPES} for a in AGENTS}
+# Carried over from earlier jobs: both cheaper stalls have been overpromising on
+# fact-checks, so the premium stall (a backup) steps in for t3 and sits out t1, t2.
+rep["haiku"]["checking"] = 0.85
+rep["sonnet"]["checking"] = 0.88
+PREMIUM_BACKUP_BELOW = 0.9
+STANDBY = "standby: backup for when the cheaper vendors slip"
 wins = {a["agent_id"]: 0 for a in AGENTS}
 
 
@@ -111,8 +119,8 @@ TASKS = [
         "bids": {
             # Promises opus-level quality at a fraction of the price: wins, then grades 6 (overpromised).
             "haiku": dict(pred=400, q=9, pitch="Fast, cheap, and I know my tides.", u=(350, 60, 1200)),
-            "sonnet": dict(pred=500, q=8, pitch="Balanced research, sources in mind.", u=(350, 140, 1900)),
-            "opus": dict(pred=600, q=9, pitch="Deep, precise physics. No hand-waving.", u=(350, 180, 2500)),
+            "sonnet": dict(pred=500, q=8, pitch="Balanced research, sources in mind.", u=(350, 62, 1200)),
+            "opus": dict(pred=600, q=9, pitch="Deep, precise physics. No hand-waving.", u=(350, 64, 1250)),
         },
         "work": dict(u=(210, 455, 4200), output=(
             "- Tides are driven mainly by the Moon's gravity; the Sun's tidal force is about 46% of the Moon's.\n"
@@ -134,8 +142,8 @@ TASKS = [
         "est_input_tokens": 420,
         "bids": {
             "haiku": dict(pred=250, q=8, pitch="Tight 150 words, lowest price on the pier.", u=(560, 58, 1100)),
-            "sonnet": dict(pred=300, q=9, pitch="Clear prose that actually uses the research.", u=(560, 150, 2000)),
-            "opus": dict(pred=350, q=9, pitch="Polished. Every sentence earns its place.", u=(560, 170, 2600)),
+            "sonnet": dict(pred=300, q=9, pitch="Clear prose that actually uses the research.", u=(560, 60, 1100)),
+            "opus": dict(pred=350, q=9, pitch="Polished. Every sentence earns its place.", u=(560, 61, 1150)),
         },
         "work": dict(u=(470, 720, 9800), output=(
             "Why two high tides a day?\n\n"
@@ -158,9 +166,10 @@ TASKS = [
         "depends_on": ["t2"],
         "est_input_tokens": 380,
         "bids": {
+            # Both cheaper stalls' checking reputations are low, so Astra's 10 wins despite its ~2c price.
             "haiku": dict(pred=200, q=9, pitch="I'll check every number, quick.", u=(520, 55, 1000)),
-            "sonnet": dict(pred=250, q=9, pitch="Careful line-by-line fact-check.", u=(520, 130, 1800)),
-            "opus": dict(pred=300, q=10, pitch="Rigorous check against known physics.", u=(520, 160, 2400)),
+            "sonnet": dict(pred=250, q=9, pitch="Careful line-by-line fact-check.", u=(520, 57, 1000)),
+            "opus": dict(pred=300, q=10, pitch="Rigorous check against known physics.", u=(520, 58, 1050)),
         },
         "work": dict(u=(430, 610, 11200), output=(
             "Verdict: accurate, one caveat.\n"
@@ -188,6 +197,7 @@ emit(0, "hello", {
         "fake_llm": False,
         "orchestrator_model": ORCH_MODEL,
         "reviewer_model": REVIEW_MODEL,
+        "prices": {model: list(price) for model, price in PRICES.items()},
     },
 }, job_id=None)
 
@@ -215,10 +225,18 @@ for i, task in enumerate(TASKS):
     bid_start = t
     scores = {}
     preds = {}
+    bidding = dict(task["bids"])
+    if max(rep["haiku"][ttype], rep["sonnet"][ttype]) >= PREMIUM_BACKUP_BELOW:
+        del bidding["opus"]  # a cheaper stall is still trusted here: no premium call at all
+        emit(bid_start, "bid", {
+            "task_id": tid, "agent_id": "opus", "ok": False, "error": STANDBY,
+            "predicted_output_tokens": None, "est_input_tokens": None, "predicted_cost_usd": None,
+            "promised_quality": None, "pitch": None, "reputation": None, "score": None, "usage": None,
+        })
     # bids arrive in order of their call duration (they run concurrently)
-    for aid, b in sorted(task["bids"].items(), key=lambda kv: kv[1]["u"][2]):
+    for aid, b in sorted(bidding.items(), key=lambda kv: kv[1]["u"][2]):
         inp, out, ms = b["u"]
-        u = usage(AGENT_MODEL[aid], inp, out, ms)
+        u = usage(BID_MODEL, inp, out, ms)
         ledger.append({"purpose": "bid", "agent_id": aid, "task_id": tid, "usage": u})
         pred_cost = cost_usd(AGENT_MODEL[aid], task["est_input_tokens"], b["pred"])
         r = rep[aid][ttype]
@@ -231,7 +249,7 @@ for i, task in enumerate(TASKS):
             "predicted_cost_usd": pred_cost, "promised_quality": b["q"], "pitch": b["pitch"],
             "reputation": r, "score": s, "usage": u,
         })
-    t = bid_start + max(b["u"][2] for b in task["bids"].values()) + 50
+    t = bid_start + max(b["u"][2] for b in bidding.values()) + 50
     order = [a["agent_id"] for a in AGENTS]
     ranked = sorted(scores, key=lambda a: (-scores[a], preds[a][1], order.index(a)))
     winner, runner = ranked[0], ranked[1]

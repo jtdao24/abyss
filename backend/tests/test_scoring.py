@@ -25,7 +25,7 @@ def test_fixture_auction_math(fixture_events: list[dict]) -> None:
         task_id = won_event["data"]["task_id"]
         bids = []
         for event in fixture_events:
-            if event["type"] != "bid" or event["data"]["task_id"] != task_id:
+            if event["type"] != "bid" or event["data"]["task_id"] != task_id or not event["data"]["ok"]:
                 continue
             data = event["data"]
             cost = predicted_cost(

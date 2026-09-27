@@ -84,7 +84,7 @@ class LLM:
 
     @property
     def provider_name(self) -> str:
-        """The AI this LLM calls: "openai" or "meta" (Muse Spark)."""
+        """The AI this LLM calls."""
         return self._provider or config.provider()
 
     async def call(
@@ -510,7 +510,7 @@ def _openai_request(
         request["max_tokens"] = max_tokens + REASONING_HEADROOM
         request["reasoning_effort"] = effort if effort in {"minimal", "low", "medium", "high"} else "low"
         return request
-    if model.startswith(("gpt-5", "o1", "o3", "o4")):
+    if model.startswith(("gpt-6", "gpt-5", "o1", "o3", "o4")):
         request["max_completion_tokens"] = max_tokens + REASONING_HEADROOM
         request["reasoning_effort"] = effort if effort in {"low", "medium", "high"} else "low"
     else:

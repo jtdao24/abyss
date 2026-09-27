@@ -11,9 +11,10 @@ import type { EventSource } from "./sources/types";
 import { WsSource } from "./sources/ws";
 import type { MarketState } from "./state/reducer";
 import { store } from "./state/store";
+import { CostCompare } from "./ui/CostCompare";
 import { CostPanel } from "./ui/CostPanel";
-import { DebugPanel } from "./ui/DebugPanel";
 import { GameDialog } from "./ui/GameDialog";
+import { Ledger } from "./ui/Ledger";
 
 const params = new URLSearchParams(window.location.search);
 const SOURCE = params.get("source") === "fixture" ? "fixture" : "ws"; // live by default; ?source=fixture replays a recording
@@ -151,6 +152,7 @@ export default function App() {
             <small>Click the Captain on the boat to start a session. Click anyone else to zoom in and watch.</small>
           </div>
           <div className="header-actions">
+            <CostCompare state={state} />
             <button type="button" className="ledger-toggle" onClick={() => setShowLedger((v) => !v)}>
               {showLedger ? (rawLedger ? "Hide ledger" : "Hide costs") : rawLedger ? "Show ledger" : "Costs"}
             </button>
@@ -179,7 +181,7 @@ export default function App() {
       </section>
       {showLedger &&
         (rawLedger || SOURCE !== "ws" ? (
-          <DebugPanel state={state} />
+          <Ledger state={state} />
         ) : (
           <CostPanel state={state} prices={prices} usage={usage} sessions={sessions} onClose={() => setShowLedger(false)} />
         ))}
