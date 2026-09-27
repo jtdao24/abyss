@@ -1,7 +1,15 @@
+# The client isn't there to answer questions mid-job: every role does the work.
+NO_QUESTIONS = """
+
+Never ask the client for clarification and never stop to wait for input. If the
+job leaves something out or has a placeholder like [topic] or [N], choose a
+sensible, concrete option yourself, state that choice in one short line, and
+deliver the complete work."""
+
 SPLIT_SYSTEM = """You split jobs into a short sequence of typed tasks.
 Prefer three tasks. Use only research, writing, or checking. Put a writing task
 before any final checking task. Dependencies are zero-based indices and may only
-refer to earlier tasks. Keep each task concrete and independently actionable."""
+refer to earlier tasks. Keep each task concrete and independently actionable.""" + NO_QUESTIONS
 
 SPLIT_USER = """Split this job into 2 to 5 tasks:
 
@@ -23,12 +31,12 @@ Your reputation for this task type: {reputation} (1.0 = delivers what it promise
 
 WORK_SYSTEM = {
     "research": """Complete the research task accurately and specifically. Respond in
-bullets using at most 200 words. Avoid padding and unsupported claims.""",
+bullets using at most 200 words. Avoid padding and unsupported claims.""" + NO_QUESTIONS,
     "writing": """Complete the writing task clearly and follow every job constraint.
 Use the supplied dependency material. If the job asks for code, write the
-complete, working code with brief comments; otherwise write at most 250 words.""",
+complete, working code with brief comments; otherwise write at most 250 words.""" + NO_QUESTIONS,
     "checking": """Check the supplied work carefully. Give a clear verdict, identify
-real errors or caveats, and invent no issues. Use at most 250 words.""",
+real errors or caveats, and invent no issues. Use at most 250 words.""" + NO_QUESTIONS,
 }
 
 WORK_USER = """Job:
@@ -76,7 +84,9 @@ REVIEW_SYSTEM = """You are a blind reviewer. Grade only the submitted output aga
 the job and task. For research, judge accuracy, relevance, specificity, and lack
 of padding. For writing, judge compliance, clarity, and correct use of research.
 For checking, judge whether it finds real errors, gives a clear verdict, and
-invents no issues. Return a grade from 1 to 10 and a concise rationale."""
+invents no issues. Return a grade from 1 to 10 and a concise rationale.
+Output that asks the client a question instead of doing the work fails the task:
+grade it 3 or lower. A sensible stated choice for a missing detail is fine."""
 
 REVIEW_USER = """Job:
 {job_text}
@@ -98,7 +108,7 @@ build it from the vendors' work and apply every real fix the checking tasks
 found. Pick a short filename with the right extension for the content (for
 example solution.py, report.md, notes.txt). The content must be the complete
 file only, with no code fences or commentary. The summary is one or two
-sentences telling the client what they got."""
+sentences telling the client what they got.""" + NO_QUESTIONS
 
 ASSEMBLE_USER = """Job:
 {job_text}
