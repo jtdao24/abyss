@@ -34,6 +34,7 @@ import {
   hitTest,
   route,
   standable,
+  walkable,
   type InteractId,
   type Interactable,
   type Point,
@@ -43,6 +44,10 @@ import {
 const FONT = ["Silkscreen", "monospace"];
 const PEOPLE_SCALE = 0.55;
 const PLAYER_SPEED = 280; // world px per second
+const MOVE_KEYS: Record<string, "up" | "down" | "left" | "right"> = {
+  w: "up", arrowup: "up", s: "down", arrowdown: "down",
+  a: "left", arrowleft: "left", d: "right", arrowright: "right",
+};
 const HEAD = 84;          // bubble height above a person's feet
 const MAX_ZOOM = 3;       // focus never zooms past this multiple of the fitted view
 const PANEL_SHARE = 0.42; // bottom share of the stage covered by the focus panel
@@ -176,6 +181,21 @@ export class MarketScene {
   private clickAge = Infinity;
   private walk: Point[] = [];
   private onArrive: (() => void) | null = null;
+  /** Movement keys held down right now (WASD / arrows). */
+  private readonly keys = new Set<string>();
+  private readonly onKeyDown = (e: KeyboardEvent): void => {
+    const key = MOVE_KEYS[e.key.toLowerCase()];
+    // never steal keys from the terminal or any other text box
+    const typing = e.target instanceof HTMLElement && (e.target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName));
+    if (!key || typing || e.ctrlKey || e.metaKey || e.altKey) return;
+    e.preventDefault();
+    this.keys.add(key);
+  };
+  private readonly onKeyUp = (e: KeyboardEvent): void => {
+    const key = MOVE_KEYS[e.key.toLowerCase()];
+    if (key) this.keys.delete(key);
+  };
+  private readonly onBlur = (): void => this.keys.clear();
   private clock = 0;
   /** Walking time since the player's last footstep sound. */
   private stepMs = 0;
@@ -295,6 +315,9 @@ export class MarketScene {
   }
 
   destroy(): void {
+    window.removeEventListener("keydown", this.onKeyDown);
+    window.removeEventListener("keyup", this.onKeyUp);
+    window.removeEventListener("blur", this.onBlur);
     this.stopWatchdog();
     this.resizeObserver?.disconnect();
     this.app.ticker.remove(this.tick);
@@ -488,6 +511,9 @@ export class MarketScene {
     this.world.hitArea = new Rectangle(0, 0, WORLD.w, WORLD.h);
     this.world.on("pointertap", (e: FederatedPointerEvent) => this.click(this.world.toLocal(e.global)));
     this.world.on("pointermove", (e: FederatedPointerEvent) => (this.pendingHover = this.world.toLocal(e.global)));
+    window.addEventListener("keydown", this.onKeyDown);
+    window.addEventListener("keyup", this.onKeyUp);
+    window.addEventListener("blur", this.onBlur);
     this.app.ticker.add(this.tick);
   }
 
@@ -653,8 +679,39 @@ export class MarketScene {
     this.lights.visible = this.light.lamps > 0.01 || this.fireflies.length > 0;
   }
 
+  /** Keyboard walking: a key press cancels a click-walk; walls are slid along, not walked through. */
+  private stepWithKeys(deltaMs: number): void {
+    const player = this.player;
+    const before = { x: player.x, y: player.y };
+    this.walk = [];
+    this.onArrive = null;
+    let dx = (this.keys.has("right") ? 1 : 0) - (this.keys.has("left") ? 1 : 0);
+    let dy = (this.keys.has("down") ? 1 : 0) - (this.keys.has("up") ? 1 : 0);
+    if (!dx && !dy) return;
+    const len = Math.hypot(dx, dy);
+    const step = (PLAYER_SPEED * deltaMs) / 1000;
+    dx = (dx / len) * step;
+    dy = (dy / len) * step;
+    if (walkable({ x: player.x + dx, y: player.y + dy })) player.position.set(player.x + dx, player.y + dy);
+    else if (dx && walkable({ x: player.x + dx, y: player.y })) player.x += dx;
+    else if (dy && walkable({ x: player.x, y: player.y + dy })) player.y += dy;
+    if (player.x !== before.x || player.y !== before.y) {
+      this.stepMs += deltaMs;
+      if (this.stepMs >= 260) {
+        this.stepMs = 0;
+        sfx.step();
+      }
+    }
+    if (dx) player.scale.x = (dx > 0 ? -1 : 1) * PEOPLE_SCALE;
+    player.rotation = Math.sin(this.clock / 85) * 0.07;
+  }
+
   private stepPlayer(deltaMs: number): void {
     const player = this.player;
+    if (this.keys.size > 0) {
+      this.stepWithKeys(deltaMs);
+      return;
+    }
     const target = this.walk[0];
     if (!target) {
       player.rotation = 0;
@@ -682,7 +739,7 @@ export class MarketScene {
       this.stepMs = 0;
       sfx.step();
     }
-    if (Math.abs(dx) > 0.5) player.scale.x = (dx > 0 ? 1 : -1) * PEOPLE_SCALE;
+    if (Math.abs(dx) > 0.5) player.scale.x = (dx > 0 ? -1 : 1) * PEOPLE_SCALE;
     player.rotation = Math.sin(this.clock / 85) * 0.07;
   }
 
