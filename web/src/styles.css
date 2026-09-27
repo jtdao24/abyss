@@ -918,3 +918,10 @@ b.top, i.top { background: var(--abyss-muted); }
   justify-self: end; padding: 3px 12px; color: var(--abyss-ink-text); background: var(--abyss-gold); border: 0;
   border-radius: 999px; cursor: pointer; font: 700 10px var(--font-mono);
 }
+
+/* ---- terminal stop button ---- */
+.ct-stop {
+  padding: 1px 8px; color: #ffb4a8; background: transparent; border: 1px solid currentColor; border-radius: 4px;
+  cursor: pointer; font: 10px var(--font-mono);
+}
+.ct-stop:hover { color: #fff; background: var(--abyss-bad); border-color: var(--abyss-bad); }

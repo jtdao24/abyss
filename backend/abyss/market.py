@@ -23,6 +23,16 @@ class Guidance:
 
     job: list[str] = field(default_factory=list)
     by_agent: dict[str, list[str]] = field(default_factory=dict)
+    stopped: bool = False
+    ledger: Ledger | None = field(default=None, repr=False)  # set by run_job
+
+    def stop(self) -> None:
+        """The user pressed Stop: no new AI call may start. Setting the hard cap
+        to what's already spent reuses the budget stop, so the job still ends
+        with a valid final (calls already in flight finish their round)."""
+        self.stopped = True
+        if self.ledger is not None:
+            self.ledger.budget_usd = self.ledger.total_cost()
 
     def add(self, target: str, note: str) -> None:
         if target == "job":
@@ -61,6 +71,10 @@ async def run_job(
     stream.start_job(job_id)
     started = time.monotonic()
     ledger = Ledger(job_id, config.ledger_path(), budget_usd)
+    if guidance is not None:
+        guidance.ledger = ledger
+        if guidance.stopped:  # stopped before the job even began
+            ledger.budget_usd = 0.0
     tasks_won = {agent.agent_id: 0 for agent in config.AGENTS}
 
     try:
@@ -127,8 +141,11 @@ async def run_job(
 
         # Budget cap (soft): once the session has spent it, no new task starts.
         # Every vendor passes without a call, so stopping costs nothing.
-        if budget_usd is not None and ledger.total_cost() + _cheapest_call_usd(llm) > budget_usd:
-            await _budget_stop(stream, ledger, tasks_won, task, budget_usd)
+        cap = ledger.budget_usd  # the job's budget, or what was spent when Stop was pressed
+        if cap is not None and (
+            (guidance is not None and guidance.stopped) or ledger.total_cost() + _cheapest_call_usd(llm) > cap
+        ):
+            await _budget_stop(stream, ledger, tasks_won, task, cap, stopped=guidance is not None and guidance.stopped)
             task_failed = True
             final_tasks.append(_final_task(task, None, None, None, ledger))
             continue
@@ -494,9 +511,14 @@ async def _budget_stop(
     tasks_won: dict[str, int],
     task: TaskSpec,
     budget_usd: float,
+    stopped: bool = False,
 ) -> None:
     """End a task before any call: each vendor passes, then a (non-fatal) error."""
-    message = f"budget reached: ${ledger.total_cost():.4f} of ${budget_usd:.4f} spent"
+    message = (
+        f"stopped by you: ${ledger.total_cost():.4f} spent, no new AI calls"
+        if stopped
+        else f"budget reached: ${ledger.total_cost():.4f} of ${budget_usd:.4f} spent"
+    )
     for agent in config.AGENTS:
         await stream.emit(
             "bid",

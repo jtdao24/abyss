@@ -11,6 +11,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import time
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
@@ -58,6 +59,10 @@ class Market:
         # joins mid-job neither misses an event nor sees one out of order.
         self.lock = asyncio.Lock()
         self.tools_changed = False  # mcp.json changed mid-session: reload when it ends
+        # Sessions waiting their turn (start_job with queue: true while busy), oldest first.
+        self.queue: list[dict] = []
+        self._queue_seq = 0
+        self.dropped: list[dict] = []  # queued sessions that couldn't start (limit reached, ...)
 
     @property
     def busy(self) -> bool:
@@ -99,7 +104,7 @@ class Market:
         self.backlog = []
         self.guidance = Guidance()
         context, names = attachments.context_for(attachment_ids or [])
-        sessions.expect(job, provider, budget_usd, names, tool_servers)
+        sessions.expect(job, provider, budget_usd, names, tool_servers, attachment_ids)
         self.running = asyncio.create_task(
             self._run(
                 job, price_weight, self.guidance, llm_for(provider),
@@ -133,13 +138,72 @@ class Market:
                 await self.stream.emit(
                     "error", {"message": f"internal error: {exc}", "task_id": None, "fatal": True}, job_id=None
                 )
+        except asyncio.CancelledError:
+            # Stop didn't finish in time (a hung call): tell everyone it ended.
+            with contextlib.suppress(Exception):
+                await self.stream.emit(
+                    "error", {"message": "stopped by you", "task_id": None, "fatal": True}, job_id=None
+                )
+            sessions.mark_stopped(self.stream.job_id)
         finally:
             if self.tools_changed:  # the Tools panel changed mcp.json mid-session
                 self.tools_changed = False
                 with contextlib.suppress(Exception):
                     await tools.shared().reload()
+            self._start_next()
+
+    # ------------------------------------------------------------- stop and queue
+    def stop(self) -> None:
+        """Stop the running job: no new AI calls; it wraps up with what it has.
+        If it hasn't ended within STOP_GRACE_SECONDS, cancel it outright."""
+        if not self.busy or self.guidance is None:
+            return
+        self.guidance.stop()
+        running = self.running
+
+        async def cancel_if_stuck() -> None:
+            await asyncio.sleep(STOP_GRACE_SECONDS)
+            if running is not None and not running.done():
+                running.cancel()
+
+        asyncio.get_running_loop().create_task(cancel_if_stuck())
+
+    def enqueue(self, message: dict) -> dict:
+        self._queue_seq += 1
+        item = {
+            "id": f"q{self._queue_seq}",
+            "job": message["job"],
+            "price_weight": message.get("price_weight", config.PRICE_WEIGHT),
+            "provider": message.get("provider"),
+            "budget_usd": message.get("budget_usd"),
+            "attachments": message.get("attachments"),
+            "tools": message.get("tools"),
+            "queued_at": time.time(),
+        }
+        self.queue.append(item)
+        return item
+
+    def dequeue(self, item_id: str) -> bool:
+        before = len(self.queue)
+        self.queue = [item for item in self.queue if item["id"] != item_id]
+        return len(self.queue) != before
+
+    def _start_next(self) -> None:
+        """Start the oldest queued session that can still run."""
+        while self.queue:
+            item = self.queue.pop(0)
+            error = _validate_start({"type": "start_job", **item}) or limits.status()["message"]
+            if error is not None:
+                logger.warning("dropped queued session %s: %s", item["id"], error)
+                self.dropped.append({"id": item["id"], "job": item["job"], "reason": error, "t": time.time()})
+                del self.dropped[:-10]
+                continue
+            self.start(item["job"], item["price_weight"], item["provider"], item["budget_usd"], item["attachments"], item["tools"])
+            return
 
 
+STOP_GRACE_SECONDS = 30.0  # after Stop, how long a job may take to wrap up before it's cancelled
+MAX_QUEUE = 10
 market = Market()
 
 
@@ -212,6 +276,16 @@ async def api_vendors() -> dict:
 
 
 # ------------------------------------------------------------------ MCP tools
+def _same_machine(request: Request) -> None:
+    """Only this computer's pages (by Origin) may change things."""
+    origin = request.headers.get("origin")
+    if origin:
+        from urllib.parse import urlparse
+
+        if urlparse(origin).hostname not in ("localhost", "127.0.0.1", "::1", "[::1]"):
+            raise HTTPException(403, "only this computer can change this")
+
+
 def _local_only(request: Request) -> None:
     """Tool changes can start programs, so only this machine's page may make
     them: JSON only (no cross-site form posts) and a localhost Origin."""
@@ -246,6 +320,26 @@ async def _apply_tool_changes() -> None:
 def _tools_view() -> dict:
     hub = tools.shared()
     return mcp_admin.overview(hub.status(), hub.activity(), hub.config_error, market.tools_changed)
+
+
+# ------------------------------------------------------------------ queue
+@app.get("/api/queue")
+async def api_queue() -> dict:
+    """The running session (if any), the sessions waiting behind it, and any that couldn't start."""
+    return {
+        "running": market.busy,
+        "stopping": bool(market.busy and market.guidance is not None and market.guidance.stopped),
+        "queue": [{"id": i["id"], "job": i["job"], "provider": i["provider"], "queued_at": i["queued_at"]} for i in market.queue],
+        "dropped": market.dropped,
+    }
+
+
+@app.delete("/api/queue/{item_id}")
+async def api_dequeue(item_id: str, request: Request) -> dict:
+    _same_machine(request)
+    if not market.dequeue(item_id):
+        raise HTTPException(404, "that session isn't in the queue")
+    return await api_queue()
 
 
 # ------------------------------------------------------------------ spending limits
@@ -358,6 +452,16 @@ async def websocket_endpoint(ws: WebSocket) -> None:
 
             message_type = message.get("type")
             if message_type == "start_job":
+                if market.busy and message.get("queue") is True:
+                    # Wait for the current session instead of being refused.
+                    error = _validate_start(message)
+                    if error is None and len(market.queue) >= MAX_QUEUE:
+                        error = f"the queue is full ({MAX_QUEUE} sessions)"
+                    if error is not None:
+                        await market.reply_error(ws, error)
+                    else:
+                        market.enqueue(message)
+                    continue
                 error = "a job is already running" if market.busy else _validate_start(message)
                 if error is None:
                     error = limits.status()["message"]  # a spending limit is used up
@@ -382,6 +486,12 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                 note = message["note"].strip()
                 market.guidance.add(message["target"], note)
                 await market.stream.emit("steered", {"target": message["target"], "note": note})
+            elif message_type == "stop_job":
+                if not market.busy:
+                    await market.reply_error(ws, "no job is running to stop")
+                    continue
+                market.stop()
+                await market.stream.emit("steered", {"target": "job", "note": "Stop: finish up, no new AI calls."})
             elif message_type == "reset":
                 if market.busy:
                     await market.reply_error(ws, "cannot reset while a job is running")
@@ -430,6 +540,8 @@ def _validate_start(message: dict) -> str | None:
             return f"attachments must be a list of at most {attachments.MAX_ATTACHMENTS} ids"
         if any(not isinstance(i, str) or attachments.load(i) is None for i in ids):
             return "an attachment is missing; add the file or link again"
+    if "queue" in message and not isinstance(message["queue"], bool):
+        return "queue must be true or false"
     servers = message.get("tools")
     if servers is not None and (
         not isinstance(servers, list) or len(servers) > 50 or not all(isinstance(s, str) for s in servers)
