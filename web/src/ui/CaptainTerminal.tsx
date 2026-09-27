@@ -5,7 +5,7 @@ import { useEffect, useLayoutEffect, useReducer, useRef, useState, type ReactNod
 import { sfx } from "../audio/sfx";
 import { api, type Attachment, type McpServer, type Provider, type SessionRecord, type SessionSummary } from "../api";
 import type { AbyssEvent, AgentId, ClientMsg } from "../contract";
-import { formatUsd } from "../state/costs";
+import { formatUsd } from "../state/money";
 import type { MarketState } from "../state/reducer";
 import { downloadText, openResult, resultDoc, stoppedJobs } from "./resultView";
 import { eventKey, nearBottom } from "./terminalScroll";

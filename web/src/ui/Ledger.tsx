@@ -1,6 +1,6 @@
 import type { AbyssEvent, AgentId, FinalData, Purpose, TaskType } from "../contract";
 import { AGENT_ORDER, VENDOR, isStandby } from "../scene/model";
-import { compareToTopModel, describeDelta, formatUsd } from "../state/costs";
+import { compareToTopModel, describeDelta, formatUsd } from "../state/money";
 import type { MarketState, TaskView } from "../state/reducer";
 
 const PURPOSES: { key: Purpose; label: string }[] = [

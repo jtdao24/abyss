@@ -1,4 +1,4 @@
-import { compareToTopModel, describeDelta, formatUsd } from "../state/costs";
+import { compareToTopModel, describeDelta, formatUsd } from "../state/money";
 import type { MarketState } from "../state/reducer";
 
 /** Header strip: what this job cost through Abyss vs the top model doing it all. */
