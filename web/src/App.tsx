@@ -5,6 +5,7 @@ import { api, type Prices, type Provider, type SessionSummary, type Usage } from
 import type { ClientMsg } from "./contract";
 
 import { Director } from "./scene/director";
+import { TIME_MODES, readTimeMode, saveTimeMode, type TimeMode } from "./scene/daylight";
 import { MarketScene } from "./scene/Scene";
 import type { InteractId } from "./scene/world";
 import { FixtureSource } from "./sources/fixture";
@@ -67,6 +68,32 @@ function SoundIcon({ muted }: { muted: boolean }) {
   );
 }
 
+const TIME_LABEL: Record<TimeMode, string> = {
+  auto: "Light follows your clock",
+  day: "Always day",
+  night: "Always night",
+};
+
+function TimeIcon({ mode }: { mode: TimeMode }) {
+  return (
+    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+      {mode === "day" && (
+        <>
+          <circle cx="8" cy="8" r="3" fill="currentColor" />
+          <path d="M8 1v2M8 13v2M1 8h2M13 8h2M3 3l1.4 1.4M11.6 11.6L13 13M3 13l1.4-1.4M11.6 4.4L13 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+        </>
+      )}
+      {mode === "night" && <path d="M10.5 2a6 6 0 1 0 3.5 10A5 5 0 0 1 10.5 2z" fill="currentColor" />}
+      {mode === "auto" && (
+        <>
+          <circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" strokeWidth="1.4" />
+          <path d="M8 2.5a5.5 5.5 0 0 1 0 11z" fill="currentColor" />
+        </>
+      )}
+    </svg>
+  );
+}
+
 export default function App() {
   const [state, setState] = useState(store.getState());
   const [dialog, setDialog] = useState<InteractId | null>(null);
@@ -80,6 +107,13 @@ export default function App() {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [usage, setUsage] = useState<Usage | null>(null);
   const [muted, setMutedState] = useState(isMuted());
+  const [timeMode, setTimeMode] = useState<TimeMode>(readTimeMode);
+  const cycleTime = () => {
+    const next = TIME_MODES[(TIME_MODES.indexOf(timeMode) + 1) % TIME_MODES.length];
+    setTimeMode(next);
+    saveTimeMode(next);
+    sceneRef.current?.setTimeMode(next);
+  };
 
   useEffect(() => {
     installAudioUnlock();
@@ -113,6 +147,7 @@ export default function App() {
       sceneRef.current = created;
       scene.onInteract = (id) => openDialog(id);
       scene.onGround = () => openDialog(null);
+      scene.setTimeMode(readTimeMode(), true);
       directorRef.current = new Director(created, SPEED);
       if (import.meta.env.DEV) (window as unknown as { __abyss: unknown }).__abyss = { scene: created, store };
       scene.render(store.getState());
@@ -209,6 +244,15 @@ export default function App() {
               onClick={() => setMuted(!muted)}
             >
               <SoundIcon muted={muted} />
+            </button>
+            <button
+              type="button"
+              className="ledger-toggle sound-toggle"
+              aria-label={`${TIME_LABEL[timeMode]} (click to change)`}
+              title={TIME_LABEL[timeMode]}
+              onClick={cycleTime}
+            >
+              <TimeIcon mode={timeMode} />
             </button>
           </div>
         </header>
