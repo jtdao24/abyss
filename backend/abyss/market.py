@@ -33,6 +33,7 @@ class Guidance:
         self.stopped = True
         if self.ledger is not None:
             self.ledger.budget_usd = self.ledger.total_cost()
+            self.ledger.stopped = True
 
     def add(self, target: str, note: str) -> None:
         if target == "job":
@@ -42,6 +43,25 @@ class Guidance:
 
     def for_agent(self, agent_id: str) -> list[str]:
         return [*self.job, *self.by_agent.get(agent_id, [])]
+
+
+@dataclass
+class RetryPlan:
+    """Redo some tasks of a finished session and keep the rest of its work.
+
+    The job runs the session's whole plan with the same task ids. Kept tasks
+    replay their saved work and grade with no AI calls (a "fixed" win, cost 0);
+    only the tasks in `redo`, and any that never finished, go out for bids.
+    If a redone task fails again, its old work stays in the file.
+    """
+
+    plan: list[TaskSpec]
+    outputs: dict[str, str]  # task id -> the session's finished work
+    redo: list[str]
+    kept: dict[str, dict]  # task id -> {"agent_id", "grade"} from the session's final
+
+    def redoes(self, task_id: str) -> bool:
+        return task_id in self.redo or task_id not in self.outputs
 
 
 @dataclass
@@ -66,6 +86,7 @@ async def run_job(
     budget_usd: float | None = None,
     context: str | None = None,
     context_names: list[str] | None = None,
+    retry: RetryPlan | None = None,
 ) -> JobResult:
     job_id = new_job_id()
     stream.start_job(job_id)
@@ -75,8 +96,11 @@ async def run_job(
         guidance.ledger = ledger
         if guidance.stopped:  # stopped before the job even began
             ledger.budget_usd = 0.0
+            ledger.stopped = True
     tasks_won = {agent.agent_id: 0 for agent in config.AGENTS}
 
+    if retry is not None:  # the session's own plan, no new split
+        tasks = retry.plan
     try:
         # The plan knows material is attached; the vendors' work prompts get the text.
         split_text = job_text + (prompts.SPLIT_CONTEXT.format(names=", ".join(context_names)) if context_names else "")
@@ -139,6 +163,16 @@ async def run_job(
             },
         )
 
+        if retry is not None and not retry.redoes(task.task_id):
+            # Kept from the earlier session: replay its work and grade, no AI calls.
+            kept = await _replay_kept(stream, ledger, tasks_won, task, retry, price_weight)
+            outputs[task.task_id] = kept["output"]
+            completed.append((task, kept["output"]))
+            if kept["grade"] is not None:
+                grades.append(kept["grade"])
+            final_tasks.append(_final_task(task, kept["agent_id"], kept["grade"], None, ledger))
+            continue
+
         # Budget cap (soft): once the session has spent it, no new task starts.
         # Every vendor passes without a call, so stopping costs nothing.
         cap = ledger.budget_usd  # the job's budget, or what was spent when Stop was pressed
@@ -148,6 +182,7 @@ async def run_job(
             await _budget_stop(stream, ledger, tasks_won, task, cap, stopped=guidance is not None and guidance.stopped)
             task_failed = True
             final_tasks.append(_final_task(task, None, None, None, ledger))
+            _keep_old_work(retry, task, outputs, completed)
             continue
 
         if fixed_agent_id is None:
@@ -166,6 +201,7 @@ async def run_job(
             if auction is None:
                 task_failed = True
                 final_tasks.append(_final_task(task, None, None, None, ledger))
+                _keep_old_work(retry, task, outputs, completed)
                 continue
             winner, promised_quality, predicted_tokens, predicted_price = auction
         else:
@@ -205,6 +241,7 @@ async def run_job(
                     task, winner.agent_id, None, promised_quality, ledger
                 )
             )
+            _keep_old_work(retry, task, outputs, completed)
             continue
 
         outputs[task.task_id] = output
@@ -283,6 +320,47 @@ async def run_job(
     return JobResult(job_id, status, final["deliverable"], ledger, final)
 
 
+def _keep_old_work(retry: RetryPlan | None, task: TaskSpec, outputs: dict[str, str], completed: list) -> None:
+    """A retried task that failed again: the earlier work stays in the file."""
+    if retry is not None and task.task_id in retry.outputs:
+        outputs[task.task_id] = retry.outputs[task.task_id]
+        completed.append((task, retry.outputs[task.task_id]))
+
+
+async def _replay_kept(
+    stream: EventStream,
+    ledger: Ledger,
+    tasks_won: dict[str, int],
+    task: TaskSpec,
+    retry: RetryPlan,
+    price_weight: float,
+) -> dict:
+    """Emit a kept task as a fixed win with its saved work and grade (cost 0)."""
+    info = retry.kept.get(task.task_id) or {}
+    agent_id = info.get("agent_id") if info.get("agent_id") in {a.agent_id for a in config.AGENTS} else config.AGENTS[0].agent_id
+    grade = info.get("grade")
+    output = retry.outputs[task.task_id]
+    tasks_won[agent_id] += 1
+    await stream.emit("won", {
+        "task_id": task.task_id, "agent_id": agent_id, "mode": "fixed", "score": None,
+        "runner_up_agent_id": None, "runner_up_score": None, "scores": {}, "price_weight": price_weight,
+    })
+    await stream.emit("stats", ledger.stats(tasks_won))
+    await stream.emit("working", {"task_id": task.task_id, "agent_id": agent_id})
+    free = {"model": "kept", "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0, "duration_ms": 0}
+    await stream.emit("done", {
+        "task_id": task.task_id, "agent_id": agent_id, "output": output,
+        "predicted_output_tokens": None, "predicted_cost_usd": None, "usage": free,
+    })
+    if grade is not None:
+        await stream.emit("graded", {
+            "task_id": task.task_id, "agent_id": agent_id, "grade": grade, "promised_quality": None,
+            "rationale": "kept from the earlier session", "usage": free,
+        })
+    await stream.emit("stats", ledger.stats(tasks_won))
+    return {"agent_id": agent_id, "grade": grade, "output": output}
+
+
 async def _package(
     stream: EventStream,
     llm: LLM,
@@ -296,6 +374,7 @@ async def _package(
     if not completed:
         return None
     last_error = ""
+    capped = False
     for _ in range(2):
         try:
             filename, content, summary, usage = await assemble(
@@ -304,15 +383,19 @@ async def _package(
         except (LLMError, ValueError) as exc:
             last_error = str(exc)
             if isinstance(exc, BudgetExceeded):
+                capped = True
                 break
             continue
         await stream.emit("assembled", {"filename": filename, "summary": summary, "usage": usage})
         await stream.emit("stats", ledger.stats(tasks_won))
         return filename, content, summary
-    await stream.emit(
-        "error",
-        {"message": f"could not assemble the file, sending the last draft: {last_error}", "task_id": None, "fatal": False},
-    )
+    if capped:
+        # Stop / budget: packaging would be a new AI call, so the file is the last finished draft.
+        reason = "stopped by you" if ledger.stopped else last_error
+        message = f"{reason} — your file is the last finished draft (not packaged)"
+    else:
+        message = f"could not assemble the file, sending the last draft: {last_error}"
+    await stream.emit("error", {"message": message, "task_id": None, "fatal": False})
     return None
 
 
@@ -426,8 +509,11 @@ async def _run_auction(
         )
 
     if not scored:
+        # Bids cut off by Stop or the budget cap aren't vendor failures: say why.
+        failures = [result for result in results.values() if isinstance(result, BaseException)]
+        capped = failures and all(isinstance(result, BudgetExceeded) for result in failures)
         await _task_error(
-            stream, ledger, tasks_won, task.task_id, "all bids failed"
+            stream, ledger, tasks_won, task.task_id, str(failures[0]) if capped else "all bids failed"
         )
         return None
 

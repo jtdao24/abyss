@@ -229,6 +229,7 @@ WebSocket `ws://localhost:8000/ws`, JSON text frames.
 |---|---|---|
 | `start_job` | `{type, job: string (1–2000 chars), price_weight?: number (0–10), provider?, budget_usd?, attachments?, tools?: string[] (MCP servers the vendors may use; omitted = all), queue?: bool (while busy, wait in line instead of being refused)}` | Runs one job and streams its events. If a job is already running anywhere on the server, it replies `error{fatal:false}`, unless `queue` is true: then it waits in line (at most 10 queued). Refused with `error{fatal:false}` when a spending limit is reached. |
 | `stop_job` | `{type}` | Stops the running job: no new AI calls start (the job's hard cap drops to what's spent), calls in flight finish their round, and the job ends with a normal `final`. A `steered` note records it. If it hasn't ended within 30 s it is cancelled with `error{fatal:true}`. |
+| `retry_task` | `{type, session_id, task_ids: string[], budget_usd?, queue?: bool}` | Redoes some tasks of a saved session and keeps the rest. It runs as a new job with the session's plan and task ids (no split call): kept tasks replay their saved work and grade as a `fixed` win at zero cost, only the named tasks (and any that never finished) go out for bids, and the file is packaged again. A redone task that fails again keeps its old work. Sessions saved before this existed can't be retried (they have no saved plan). |
 | `steer` | `{type, target: "job"\|AgentId, note: string (1–500 chars)}` | Only while a job runs. Adds a note to that job: `"job"` notes go to every remaining work and review prompt; an agent's notes go to that agent's work (and its review). Notes are read when each work call starts, so they apply from the next piece of work on; a call already running is not changed. Replies `steered`, or `error{fatal:false}` if no job is running or the message is invalid. |
 | `reset` | `{type}` | Resets reputation to `REP_INIT` for everyone, persists it and re-sends `hello`. Rejected while a job runs. |
 
@@ -252,7 +253,8 @@ The built web app (`web/dist`) is served at `/`.
 ## 9. Repo layout and ownership
 
 ```
-SPEC.md TASKS.md README.md .gitignore .env.example mcp.example.json
+SPEC.md README.md CONTRIBUTING.md LICENSE .gitignore .env.example mcp.example.json
+docs/TASKS.md                                          (original build plan, historical)
 start.py start.cmd start.sh                            (one-command launcher)
 .github/workflows/ci.yml                               (pytest, vitest, web build)
 fixtures/     make_fake_run.py, fake_run.json         (orchestrator-owned)

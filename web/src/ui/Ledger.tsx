@@ -1,6 +1,6 @@
 import type { AbyssEvent, AgentId, FinalData, Purpose, TaskType } from "../contract";
-import { AGENT_ORDER, VENDOR, isStandby } from "../scene/model";
-import { compareToTopModel, describeDelta, formatUsd } from "../state/costs";
+import { AGENT_ORDER, VENDOR, isStandby, vendorTitle } from "../scene/model";
+import { compareToTopModel, describeDelta, formatUsd } from "../state/money";
 import type { MarketState, TaskView } from "../state/reducer";
 
 const PURPOSES: { key: Purpose; label: string }[] = [
@@ -28,9 +28,7 @@ const FINAL_LABEL: Record<FinalData["status"], string> = { ok: "Done", partial: 
 /** A vendor is slipping on a task type when it delivers under 90% of what it promises. */
 const SLIPPING_BELOW = 0.9;
 
-function vendorName(agentId: AgentId): string {
-  return VENDOR[agentId].name.replace("VENDOR", "Vendor");
-}
+const vendorName = vendorTitle;
 
 function Vendor({ agentId, state }: { agentId: AgentId; state: MarketState }) {
   return (

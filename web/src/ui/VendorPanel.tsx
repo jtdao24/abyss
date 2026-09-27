@@ -1,13 +1,13 @@
 // The panel for a vendor you walked up to: who they are, what they're doing
 // right now (live), a note box to steer them, and their track record.
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 
 import { api, type VendorStats } from "../api";
 import type { AbyssEvent, AgentId, ClientMsg, TaskType } from "../contract";
-import { VENDOR, formatCents, isStandby } from "../scene/model";
+import { TASK_TYPES as TYPES, VENDOR, formatCents, isStandby, vendorTitle } from "../scene/model";
 import type { MarketState, TaskView } from "../state/reducer";
+import { useDialogFocus } from "./useDialogFocus";
 
-const TYPES: TaskType[] = ["research", "writing", "checking"];
 const SPRITE: Record<AgentId, string> = { opus: "vendor1", sonnet: "vendor2", haiku: "vendor3" };
 const STEPS = ["Bid", "Won", "Working", "Graded"] as const;
 const QUICK_NOTES = ["Be concise", "Cite sources", "Double-check facts", "Simpler words", "More detail"];
@@ -99,6 +99,9 @@ function useVendorStats(agentId: AgentId, live: boolean): VendorStats | null {
   return stats;
 }
 
+const TABS = ["now", "steer", "record"] as const;
+type Tab = (typeof TABS)[number];
+
 interface Props {
   agentId: AgentId;
   state: MarketState;
@@ -107,8 +110,21 @@ interface Props {
 }
 
 export function VendorPanel({ agentId, state, onClose, send }: Props) {
-  const [tab, setTab] = useState<"now" | "steer" | "record">("now");
+  const [tab, setTab] = useState<Tab>("now");
   const [ack, setAck] = useState<string | null>(null);
+  const ref = useRef<HTMLDivElement | null>(null);
+  useDialogFocus(ref);
+  const tabIds = { tab: (t: Tab) => `vp-${agentId}-tab-${t}`, panel: `vp-${agentId}-panel` };
+  // Arrow keys move between the tabs (the usual tablist keyboard pattern).
+  const onTabKey = (e: KeyboardEvent<HTMLElement>) => {
+    const step = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+    if (!step && e.key !== "Home" && e.key !== "End") return;
+    e.preventDefault();
+    const at = TABS.indexOf(tab);
+    const next = e.key === "Home" ? 0 : e.key === "End" ? TABS.length - 1 : (at + step + TABS.length) % TABS.length;
+    setTab(TABS[next]);
+    document.getElementById(tabIds.tab(TABS[next]))?.focus();
+  };
   const vendor = VENDOR[agentId];
   const agent = state.agents[agentId];
   // Once the job is over, show this vendor's own last task rather than the last auction.
@@ -126,7 +142,7 @@ export function VendorPanel({ agentId, state, onClose, send }: Props) {
   }, [ack]);
 
   return (
-    <div className="rpg-dialog side vendor-panel" role="dialog" aria-label={vendor.name} onPointerDown={(e) => e.stopPropagation()}>
+    <div ref={ref} className="rpg-dialog side vendor-panel" role="dialog" aria-label={vendor.name} onPointerDown={(e) => e.stopPropagation()}>
       <div className="vp-head">
         <button
           type="button"
@@ -141,7 +157,7 @@ export function VendorPanel({ agentId, state, onClose, send }: Props) {
           {ack && <span className="vp-say">{ack}</span>}
         </button>
         <div className="vp-id">
-          <strong>{vendor.name.replace("VENDOR", "Vendor")}</strong>
+          <strong>{vendorTitle(agentId)}</strong>
           <small>{agent?.display_name ?? ""} · {vendor.tier.toLowerCase()}</small>
           <span className={`vp-status phase-${phase}`}><i />{PHASE_LABEL[phase]}</span>
         </div>
@@ -159,15 +175,25 @@ export function VendorPanel({ agentId, state, onClose, send }: Props) {
         </ol>
       )}
 
-      <nav className="vp-tabs" role="tablist">
-        {(["now", "steer", "record"] as const).map((t) => (
-          <button key={t} type="button" role="tab" aria-selected={tab === t} className={tab === t ? "on" : ""} onClick={() => setTab(t)}>
+      <div className="vp-tabs" role="tablist" aria-label={`${vendor.name} panels`} onKeyDown={onTabKey}>
+        {TABS.map((t) => (
+          <button
+            key={t}
+            id={tabIds.tab(t)}
+            type="button"
+            role="tab"
+            aria-selected={tab === t}
+            aria-controls={tabIds.panel}
+            tabIndex={tab === t ? 0 : -1}
+            className={tab === t ? "on" : ""}
+            onClick={() => setTab(t)}
+          >
             {t === "now" ? "Now" : t === "steer" ? "Steer" : "Record"}
           </button>
         ))}
-      </nav>
+      </div>
 
-      <div className="vp-body" key={tab}>
+      <div className="vp-body" key={tab} id={tabIds.panel} role="tabpanel" aria-labelledby={tabIds.tab(tab)}>
         {tab === "now" && <NowTab task={task} agentId={agentId} phase={phase} items={items} state={state} />}
         {tab === "steer" && <SteerTab state={state} agentId={agentId} send={send} onSent={() => setAck("Got it!")} />}
         {tab === "record" && <RecordTab state={state} agentId={agentId} live={Boolean(send)} />}
@@ -187,10 +213,10 @@ function NowTab({ task, agentId, phase, items, state }: { task: TaskView | null;
           <div className="vp-task-top">
             <span className={`type-chip ${task.type}`}>{task.type}</span>
             <strong>{task.title}</strong>
-            {mine && task.grade !== null && <em className={`vp-grade ${task.grade >= 8 ? "good" : task.grade >= 6 ? "ok" : "bad"}`} title={task.rationale ?? ""}>{task.grade}/10</em>}
+            {mine && task.grade !== null && <em className={`vp-grade ${task.grade >= 8 ? "good" : task.grade >= 6 ? "ok" : "bad"}`} title={task.rationale ?? ""} aria-label={`Graded ${task.grade} out of 10${task.rationale ? `: ${task.rationale}` : ""}`}>{task.grade}/10</em>}
           </div>
           {bid?.ok && <p className="vp-pitch">"{bid.pitch}" · promised {bid.promised_quality}/10</p>}
-          {phase === "lost" && task.winner && <p className="vp-pitch">{VENDOR[task.winner].name.replace("VENDOR", "Vendor")} won this one.</p>}
+          {phase === "lost" && task.winner && <p className="vp-pitch">{vendorTitle(task.winner)} won this one.</p>}
           {phase === "working" && <div className="working-bar"><i /></div>}
           {mine && task.output && (
             <>

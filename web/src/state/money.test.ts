@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import fixture from "../../public/fixtures/fake_run.json";
-import type { AbyssEvent } from "../contract";
-import { compareToTopModel, describeDelta, formatUsd } from "./costs";
+import type { AbyssEvent, StatsData } from "../contract";
+import { compareToTopModel, describeDelta, formatTokens, formatUsd, purposeShares } from "./money";
 import { initialState, reduce } from "./reducer";
 
 const events = fixture as AbyssEvent[];
@@ -54,5 +54,42 @@ describe("formatting", () => {
     expect(describeDelta(-0.281)).toEqual({ text: "28% cheaper", tone: "better" });
     expect(describeDelta(0.28)).toEqual({ text: "28% pricier", tone: "worse" });
     expect(describeDelta(0.001)).toEqual({ text: "same cost", tone: "even" });
+  });
+});
+
+describe("purposeShares", () => {
+  const bucket = (cost_usd: number, calls: number) => ({ cost_usd, calls });
+  const stats = (costs: [number, number, number, number, number]) =>
+    ({
+      total_cost_usd: costs.reduce((a, b) => a + b, 0),
+      input_tokens: 0,
+      output_tokens: 0,
+      calls: 10,
+      by_purpose: {
+        split: bucket(costs[0], 1),
+        bid: bucket(costs[1], 3),
+        work: bucket(costs[2], 3),
+        review: bucket(costs[3], 2),
+        assemble: bucket(costs[4], 1),
+      },
+      by_agent: {} as StatsData["by_agent"],
+    }) as StatsData;
+
+  it("adds up to 100%", () => {
+    const shares = purposeShares(stats([0.001, 0.002, 0.004, 0.002, 0.001]));
+    expect(shares.reduce((sum, s) => sum + s.pct, 0)).toBeCloseTo(100);
+    expect(shares.find((s) => s.purpose === "work")?.pct).toBeCloseTo(40);
+  });
+
+  it("is all zero before anything is spent", () => {
+    expect(purposeShares(stats([0, 0, 0, 0, 0])).every((s) => s.pct === 0)).toBe(true);
+  });
+});
+
+describe("formatTokens", () => {
+  it("shortens big counts", () => {
+    expect(formatTokens(950)).toBe("950");
+    expect(formatTokens(1234)).toBe("1.2k");
+    expect(formatTokens(3_400_000)).toBe("3.4M");
   });
 });

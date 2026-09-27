@@ -46,7 +46,12 @@ export interface SessionRecord {
   budget_usd?: number | null;
   tools?: string[] | null;
   attachment_ids?: string[];
+  /** The session's tasks (saved since retries exist), for /retry. */
+  plan?: { task_id: string; type: string; title: string }[];
+  retry_of?: string | null;
   status: string;
+  /** The user pressed Stop (the final is still "partial" or "ok"). */
+  stopped?: boolean;
   started_at: number;
   stats: StatsData | null;
   final: FinalData | null;

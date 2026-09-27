@@ -34,8 +34,7 @@ export interface ExperimentResults {
   arms: ArmResult[];
 }
 
-export const AGENT_IDS: AgentId[] = ["haiku", "sonnet", "opus"];
-export const TASK_TYPES: TaskType[] = ["research", "writing", "checking"];
+export { AGENT_ORDER as AGENT_IDS, TASK_TYPES } from "../../scene/model";
 
 // Identity colors: market arms share one hue; fixed arms wear their agent's color
 // (same entity → same color as the market scene).

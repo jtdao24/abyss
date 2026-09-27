@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import importlib
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -66,6 +67,62 @@ async def test_only_web_links_are_fetched() -> None:
     for url in ("file:///etc/passwd", "ftp://example.com/x", "not a url"):
         with pytest.raises(attachments.AttachmentError):
             await attachments.text_from_url(url)
+
+
+PUBLIC_IP = "93.184.215.14"
+
+
+@pytest.fixture
+def fake_web(monkeypatch):
+    """No network: names resolve from a table, pages come from a MockTransport."""
+    names = {"example.com": [PUBLIC_IP], "sneaky.example": [PUBLIC_IP, "10.0.0.5"], "localhost": ["127.0.0.1", "::1"]}
+
+    async def resolve(host: str, port: int) -> list[str]:
+        return names.get(host, [host])  # an IP literal resolves to itself
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/hop-to-router":
+            return httpx.Response(302, headers={"location": "http://192.168.1.1/admin"})
+        if request.url.path == "/loop":
+            return httpx.Response(302, headers={"location": "/loop"})
+        return httpx.Response(200, html="<title>Tide tables</title><p>High water at noon.</p>")
+
+    monkeypatch.setattr(attachments, "_resolve", resolve)
+    monkeypatch.setattr(attachments, "_transport", httpx.MockTransport(handler))
+
+
+@pytest.mark.parametrize("url", [
+    "http://localhost:8000/api/sessions",
+    "http://127.0.0.1:8000/api/sessions",
+    "http://[::1]:8000/",
+    "http://[::ffff:127.0.0.1]/",
+    "http://10.0.0.1/",
+    "http://192.168.1.1/admin",
+    "http://169.254.169.254/latest/meta-data/",  # cloud metadata
+    "http://0.0.0.0:8000/",
+    "http://sneaky.example/",                    # one private address is enough
+])
+async def test_links_to_this_computer_or_the_local_network_are_refused(fake_web, url) -> None:
+    with pytest.raises(attachments.AttachmentError, match="local network"):
+        await attachments.text_from_url(url)
+
+
+async def test_public_pages_are_fetched(fake_web) -> None:
+    name, text = await attachments.text_from_url("https://example.com/tides")
+    assert name == "Tide tables" and "High water at noon." in text
+
+
+async def test_every_redirect_hop_is_checked(fake_web) -> None:
+    with pytest.raises(attachments.AttachmentError, match="local network"):
+        await attachments.text_from_url("https://example.com/hop-to-router")
+    with pytest.raises(attachments.AttachmentError, match="redirects too many times"):
+        await attachments.text_from_url("https://example.com/loop")
+
+
+async def test_private_links_can_be_allowed(fake_web, monkeypatch) -> None:
+    monkeypatch.setenv("ABYSS_ALLOW_PRIVATE_LINKS", "1")
+    name, _ = await attachments.text_from_url("http://192.168.1.1/admin")
+    assert name == "Tide tables"
 
 
 def test_material_reaches_the_work_prompt_capped(tmp_path, monkeypatch) -> None:

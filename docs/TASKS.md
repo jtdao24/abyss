@@ -2,7 +2,7 @@
 
 This is the original 36-hour build plan. The orchestrator (Claude) planned, specced and reviewed; Codex wrote the feature code, one session per task.
 
-> **Historical.** T01–T12 are kept as they were written. They were built on Anthropic models (Haiku / Sonnet / Opus, the `anthropic` SDK, `ANTHROPIC_API_KEY`). Abyss has since moved to **OpenAI and Meta Muse Spark** through the OpenAI SDK. The `haiku` / `sonnet` / `opus` agent ids stayed as frozen contract ids for the budget / standard / premium stalls. Numbers in the old briefs (fixture event count and total, model names and prices) are out of date. [SPEC.md](SPEC.md) and [README.md](README.md) describe the app as it is now.
+> **Historical.** T01–T12 are kept as they were written. They were built on Anthropic models (Haiku / Sonnet / Opus, the `anthropic` SDK, `ANTHROPIC_API_KEY`). Abyss has since moved to **OpenAI and Meta Muse Spark** through the OpenAI SDK. The `haiku` / `sonnet` / `opus` agent ids stayed as frozen contract ids for the budget / standard / premium stalls. Numbers in the old briefs (fixture event count and total, model names and prices) are out of date. [SPEC.md](../SPEC.md) and [README.md](../README.md) describe the app as it is now.
 
 ## How to use this file
 

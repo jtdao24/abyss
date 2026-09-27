@@ -23,7 +23,7 @@ import { daylightFor, mixColor, type Daylight, type TimeMode } from "./daylight"
 import { fitScale } from "./fit";
 import { THEME } from "../theme";
 import type { MarketState } from "../state/reducer";
-import { AGENT_ORDER, MAX_CARDS, VENDOR, sceneModel, type BubbleTone, type SceneModel } from "./model";
+import { AGENT_ORDER, MAX_CARDS, VENDOR, sceneModel, type BubbleTone, type SceneModel, type StallModel } from "./model";
 import {
   MAIN_AGENT_POS,
   PLAYER_START,
@@ -47,7 +47,10 @@ const HEAD = 84;          // bubble height above a person's feet
 const MAX_ZOOM = 3;       // focus never zooms past this multiple of the fitted view
 const PANEL_SHARE = 0.42; // bottom share of the stage covered by the focus panel
 /** ?calm=1 turns off the rippling water and swaying leaves (for slow machines). */
-const CALM = new URLSearchParams(window.location.search).get("calm") === "1";
+/** Also on when the system asks for less motion. */
+const CALM =
+  new URLSearchParams(window.location.search).get("calm") === "1" ||
+  (typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
 const FIREFLIES = 16;             // at full night
 const DAYLIGHT_EVERY_MS = 60_000; // on auto, how often the light follows the clock
 const ease = (p: number) => p * p * (3 - 2 * p);
@@ -75,6 +78,15 @@ const TYPE_COLOR: Record<TaskType, string> = {
   writing: PALETTE.writing,
   checking: PALETTE.checking,
 };
+/** What a vendor is visibly doing with a task it won (director.ts plays it out). */
+export type VendorStage = "none" | "won" | "working" | "done";
+const WINNER_TONES = new Set<BubbleTone>(["won", "working", "done"]);
+const STAGE_BUBBLE: Record<Exclude<VendorStage, "none">, NonNullable<StallModel["bubble"]>> = {
+  won: { text: "WON!", tone: "won" },
+  working: { text: "WORKING", tone: "working" },
+  done: { text: "DONE", tone: "done" },
+};
+
 const BUBBLE_TEXT: Record<BubbleTone, string> = {
   thinking: PALETTE.muted,
   bid: PALETTE.ink,
@@ -158,6 +170,8 @@ export class MarketScene {
   private readonly hover = new Graphics();
   private hoverLabel!: Text;
   private hovered: Interactable | "tasks" | null = null;
+  /** The latest pointer position, handled once per frame (pointermove fires far more often). */
+  private pendingHover: Point | null = null;
   private readonly clickRing = new Graphics();
   private clickAge = Infinity;
   private walk: Point[] = [];
@@ -166,6 +180,7 @@ export class MarketScene {
   /** Walking time since the player's last footstep sound. */
   private stepMs = 0;
   private lastModel = "";
+  private model: SceneModel | null = null;
   private resizeObserver: ResizeObserver | null = null;
   private ambient!: Ambient;
   /** Camera: the fitted view, where it is heading, and where it is now. */
@@ -244,6 +259,11 @@ export class MarketScene {
     scene.build(backdrop, people, ambient.lanterns);
     el.appendChild(app.canvas);
     app.canvas.classList.add("market-canvas");
+    app.canvas.setAttribute("role", "img");
+    app.canvas.setAttribute(
+      "aria-label",
+      "The boardwalk market: the Captain on the boat, three vendor stalls and the lifeguard. Use the Captain button or the list of people to open their panels.",
+    );
     scene.resizeObserver = new ResizeObserver(() => scene.fit());
     scene.resizeObserver.observe(el);
     scene.fit();
@@ -256,13 +276,34 @@ export class MarketScene {
     const key = JSON.stringify(model);
     if (key === this.lastModel) return;
     this.lastModel = key;
+    this.model = model;
     this.apply(model);
+  }
+
+  /**
+   * Set by director.ts: what a vendor is visibly doing, so WON! / WORKING / DONE
+   * appear when the animation gets there, not when the event arrives.
+   * Without a director, bubbles follow the state alone.
+   */
+  stageOf: ((agentId: AgentId) => VendorStage) | null = null;
+  /** Set by director.ts: true while finished work is still on its way to the reviewer. */
+  handOverPending: (() => boolean) | null = null;
+
+  /** Re-draw the bubbles after the director's picture of things changes. */
+  refreshBubbles(): void {
+    if (this.model) this.apply(this.model);
   }
 
   destroy(): void {
     this.stopWatchdog();
     this.resizeObserver?.disconnect();
     this.app.ticker.remove(this.tick);
+    // The ripples own canvas textures and filters Pixi doesn't know to free:
+    // unbind them first, or Pixi warns about textures destroyed while bound.
+    this.ambient?.destroy();
+    // Leave the loaded art alone: the backdrop and characters come from Pixi's
+    // Assets cache and are shared with the next scene. (React's dev mode mounts
+    // the page twice, so destroying them here left the second scene black.)
     this.app.destroy(true, { children: true });
   }
 
@@ -342,6 +383,14 @@ export class MarketScene {
     this.base = fitted;
     this.camTarget = this.cameraFor(this.focused);
     if (this.focused === null) this.cam = { ...this.base };
+    // A resize clears the canvas. Draw now, inside the ResizeObserver callback
+    // (before the browser paints), or the page shows one blank frame.
+    this.stepCamera(0);
+    try {
+      this.app.render();
+    } catch {
+      /* the guarded frame loop reports render errors; the next tick retries */
+    }
   }
 
   private cameraFor(id: InteractId | null): { scale: number; x: number; y: number } {
@@ -438,7 +487,7 @@ export class MarketScene {
     this.world.eventMode = "static";
     this.world.hitArea = new Rectangle(0, 0, WORLD.w, WORLD.h);
     this.world.on("pointertap", (e: FederatedPointerEvent) => this.click(this.world.toLocal(e.global)));
-    this.world.on("pointermove", (e: FederatedPointerEvent) => this.setHover(this.world.toLocal(e.global)));
+    this.world.on("pointermove", (e: FederatedPointerEvent) => (this.pendingHover = this.world.toLocal(e.global)));
     this.app.ticker.add(this.tick);
   }
 
@@ -483,7 +532,10 @@ export class MarketScene {
     }
     const thing = hitTest(p, this.vendorPositions());
     const dest = standable(thing ? thing.approach : p);
-    this.walkTo(dest, thing ? () => this.onInteract(thing.id) : null);
+    // The panel opens right away; the player still walks over. (Waiting for
+    // the walk took seconds from across the pier, with no sign anything happened.)
+    this.walkTo(dest);
+    if (thing) this.onInteract(thing.id);
     if (!thing) {
       sfx.click();
       this.onGround();
@@ -500,7 +552,10 @@ export class MarketScene {
   private setHover(p: Point): void {
     // Vendors move, so their box is rebuilt on every call (and the outline follows them).
     const thing = inPanel(p) ? "tasks" : hitTest(p, this.vendorPositions());
-    if (thing === this.hovered) return;
+    const id = (t: typeof thing) => (t === null ? null : t === "tasks" ? "tasks" : t.id);
+    // Same person, same spot: nothing to redraw. (A vendor's box is a new
+    // object each call, so compare who it is and where, not the object.)
+    if (id(thing) === id(this.hovered) && (thing === null || thing === "tasks" || this.hovered === null || this.hovered === "tasks" || thing.hit.join() === this.hovered.hit.join())) return;
     this.hovered = thing;
     this.app.canvas.style.cursor = thing ? "pointer" : "default";
     this.hover.clear();
@@ -516,6 +571,10 @@ export class MarketScene {
   private readonly tick = (ticker: Ticker): void => {
     this.clock += ticker.deltaMS;
     this.stepCamera(ticker.deltaMS);
+    if (this.pendingHover) {
+      this.setHover(this.pendingHover);
+      this.pendingHover = null;
+    }
     this.ambient.update(ticker);
     this.stepLight(ticker.deltaMS);
     this.stepPlayer(ticker.deltaMS);
@@ -560,8 +619,8 @@ export class MarketScene {
       g.alpha = lamps * flicker;
     }
 
-    // fireflies come out once it's properly dark
-    const wanted = Math.round(FIREFLIES * Math.max(0, (lamps - 0.4) / 0.6));
+    // fireflies come out once it's properly dark (not with reduced motion or ?calm=1)
+    const wanted = CALM ? 0 : Math.round(FIREFLIES * Math.max(0, (lamps - 0.4) / 0.6));
     if (this.fireflies.length < wanted && Math.random() < deltaMs / 250) this.spawnFirefly();
     for (let i = this.fireflies.length - 1; i >= 0; i -= 1) {
       const fly = this.fireflies[i];
@@ -628,6 +687,13 @@ export class MarketScene {
   }
 
   // ------------------------------------------------------------ state -> picture
+  /** The winner's WON! / WORKING / DONE follow the animation; bidding bubbles follow the state. */
+  private shownBubble(agentId: AgentId, fromState: StallModel["bubble"]): StallModel["bubble"] {
+    if (!this.stageOf || !fromState || !WINNER_TONES.has(fromState.tone)) return fromState;
+    const stage = this.stageOf(agentId);
+    return stage === "none" ? null : STAGE_BUBBLE[stage];
+  }
+
   private apply(model: SceneModel): void {
     this.banner.text = model.banner.length > 90 ? `${model.banner.slice(0, 87)}...` : model.banner;
     this.spent.text = model.spent;
@@ -635,7 +701,7 @@ export class MarketScene {
     for (const agentId of AGENT_ORDER) {
       const stall = model.stalls.find((s) => s.agentId === agentId) ?? null;
       this.winnerFlags[agentId].visible = stall?.winner ?? false;
-      const bubble = stall?.bubble ?? null;
+      const bubble = this.shownBubble(agentId, stall?.bubble ?? null);
       this.vendorBubbles[agentId].set(
         bubble?.text ?? null,
         bubble ? BUBBLE_TEXT[bubble.tone] : PALETTE.ink,
@@ -645,7 +711,9 @@ export class MarketScene {
 
     this.mainBubble.set(model.mainAgent);
 
-    if (model.reviewing) this.reviewBubble.set("...", PALETTE.muted);
+    // The reviewer only reacts once the work has actually been handed over.
+    if (this.handOverPending?.()) this.reviewBubble.set(null);
+    else if (model.reviewing) this.reviewBubble.set("...", PALETTE.muted);
     else if (model.review) {
       const grade = model.review.text.split(" ")[1];
       const tone = model.review.tone;

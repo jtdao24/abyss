@@ -50,6 +50,52 @@ def test_stop_ends_the_job_with_a_valid_final(monkeypatch, tmp_path) -> None:
     assert len(graded) < len(final["tasks"]) or not final["tasks"]
 
 
+def test_stop_is_reported_as_a_stop_not_as_failures(monkeypatch, tmp_path) -> None:
+    server = _server(monkeypatch, tmp_path, delay="0.05")
+    with TestClient(server.app) as client:
+        with client.websocket_connect("/ws") as ws:
+            hello = ws.receive_json()
+            ws.send_json(JOB)
+            first = ws.receive_json()
+            ws.receive_json()  # stats
+            ws.receive_json()  # task_posted: bids for t1 are about to start
+            ws.send_json({"type": "stop_job"})
+            events = _receive_through_final(ws, hello)
+            record = client.get(f"/api/sessions/{first['job_id']}").json()
+
+    assert record["stopped"] is True
+    messages = [e["data"]["message"] for e in events if e["type"] == "error"]
+    assert messages, "the stop should be reported"
+    assert not any("all bids failed" in m or "could not assemble" in m for m in messages), messages
+    assert not any(m.startswith("budget reached") for m in messages), messages
+    failed_bids = [e["data"]["error"] for e in events if e["type"] == "bid" and not e["data"]["ok"]]
+    assert all(err.startswith(("stopped by you", "standby")) for err in failed_bids), failed_bids
+
+
+def test_chat_says_stopped_calmly(tmp_path) -> None:
+    from abyss.chat import ChatState, describe, finish
+
+    state = ChatState(my_job_id="j_1")
+    steer = {"type": "steered", "job_id": "j_1", "data": {"target": "job", "note": "Stop: finish up, no new AI calls."}}
+    error = {"type": "error", "job_id": "j_1", "data": {"message": "stopped by you: $0.0100 spent, no new AI calls", "task_id": "t2", "fatal": False}}
+    bid = {"type": "bid", "job_id": "j_1", "data": {"agent_id": "haiku", "ok": False, "error": "stopped by you: $0.0100 spent, no new AI calls"}}
+    assert "Stopping" in describe(steer, state)
+    said = describe(error, state)
+    assert "⚠" not in said and "Stopped by you" in said
+    assert describe(bid, state) is None
+    assert "j_1" in state.stopped
+    later = {**error, "data": {**error["data"], "task_id": "t3"}}
+    assert "T3 skipped" in describe(later, state)
+    draft = {**error, "data": {**error["data"], "task_id": None, "message": "stopped by you — your file is the last finished draft (not packaged)"}}
+    assert "Your file is the last finished draft" in describe(draft, state)
+    final = {"type": "final", "job_id": "j_1", "data": {
+        "status": "partial", "deliverable": "draft", "filename": "abyss_result.md", "summary": None,
+        "mean_grade": 7.0, "total_cost_usd": 0.01, "duration_ms": 1200,
+    }}
+    line = finish(final, state, tmp_path)
+    assert "Stopped" in line and "Done" not in line and "status partial" not in line
+
+
 def test_stop_with_nothing_running_is_refused(monkeypatch, tmp_path) -> None:
     server = _server(monkeypatch, tmp_path)
     with TestClient(server.app) as client:

@@ -60,6 +60,7 @@ class Ledger:
         # A hard cap for the whole job: the LLM gateway refuses calls (and caps
         # each call's output tokens) so recorded spend never passes it.
         self.budget_usd = budget_usd
+        self.stopped = False  # the user pressed Stop: the budget is what was spent then
         self._entries: list[LedgerEntry] = []
 
     def remaining_usd(self) -> float | None:

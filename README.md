@@ -1,5 +1,7 @@
 # Abyss
 
+![Abyss: AI agents bid on your task in a pixel-art seaside market](art/thumbnail/thumbnail.png)
+
 A pixel-art seaside market where AI agents bid on work.
 
 You give the **main agent** a job, such as "research X and write a 200-word brief". It splits the job into typed subtasks (`research`, `writing`, `checking`). For each task, three **vendors** bid a predicted cost and a promised quality. The best score wins and does the work. A **blind reviewer** then grades it. Each vendor's reputation moves toward what it actually delivered, so overpromisers get discounted over time. At the end, the main agent packages everything into a file and saves it to your Downloads folder.
@@ -77,16 +79,18 @@ Click the Main Agent on the boat to open the Captain terminal. Type a job and pr
 | `/steer <1\|2\|3\|job> <note>` | steer one vendor, or the whole job, mid-run |
 | `/stop` (or the red **stop** button) | stop the running job: work in hand finishes, no new AI calls start |
 | `/queue`, `/unqueue <n>` | list queued jobs, remove one |
-| `/sessions`, `/open <n>`, `/rerun [n]` | past sessions; run one again with the same job, AI, budget, tools and files |
+| `/sessions`, `/open <n>`, `/rerun [n]` | past sessions; open one's file, or run it again with the same job, AI, budget, tools and files |
 | `/price <0-5>` | how much price matters when choosing a vendor (0 = quality only) |
 | `/budget <usd\|off>` | hard spending cap for your next job |
 | `/ai [name]` | pick the AI for your next job |
-| `/link <url>`, `/file` | attach a link or a file to your next job |
+| `/link <url>`, `/file` | attach a link or a file to your next job (links must be public web pages; set `ABYSS_ALLOW_PRIVATE_LINKS=1` in `backend/.env` to allow your local network) |
 | `/tools [on\|off <name>\|all]` | which tool servers the vendors may use |
 | `/examples`, `/example <n>` | sample jobs |
 | `/estimate` | what a typical job costs |
-| `/result`, `/save` | read or download the finished file |
+| `/result`, `/save` | open or download the finished file |
 | `/status`, `/reset`, `/clear`, `/exit` | what's running; reset every vendor's reputation; clear; close |
+
+When a job finishes, click **Open file** in the terminal (or **File** in the header) to read the result: Markdown is shown formatted, code and data files as plain text, with **Copy** and **Download**. If you stopped the job, the file has what was finished.
 
 There's also a plain terminal chat (`python start.py --chat`) with `/steer`, `/price`, `/reset` and `/status`. It shares the same market as the browser.
 
@@ -97,7 +101,7 @@ The market shows vendor names, not models. The table above says which model runs
 - **Per job:** `/budget` sets a hard cap. The crew stops starting AI calls when it runs out.
 - **Per day, week and month:** click the spend meter in the bottom-right corner to set limits. At 80% the page warns you; at 100% new sessions are refused and a running one is capped to what's left.
 - **Right now:** `/stop` ends the running job.
-- **Costs:** the **Costs** button in the header shows what each session cost and what the premium vendor alone would have cost.
+- **Costs:** the **Costs** button in the header shows what each session cost and what the premium vendor alone would have cost. That comparison is an estimate: the same work tokens at the premium model's rates, the same planning, review and packaging, and no bids (a single vendor needs no auction).
 
 The speaker button in the header turns the 8-bit sound effects on or off (remembered per browser).
 
@@ -139,6 +143,7 @@ fixtures/        canonical recorded run used by tests and replay
 experiments/     experiment jobs and results
 runs/            your local ledger, reputation, sessions, limits, logs (gitignored)
 .github/         CI workflow
+docs/            original build plan (historical)
 ```
 
 ## License

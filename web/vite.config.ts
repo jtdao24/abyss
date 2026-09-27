@@ -14,6 +14,15 @@ export default defineConfig({
       "/ws": { target: BACKEND, ws: true },
     },
   },
+  build: {
+    rollupOptions: {
+      // React changes far less often than the app: its own chunk caches
+      // separately. (Pixi stays with the app so its renderers, WebGL, WebGPU
+      // and canvas, keep loading on demand; forcing it into one chunk would
+      // pull all three in.)
+      output: { manualChunks: { react: ["react", "react-dom", "react-dom/client"] } },
+    },
+  },
   test: {
     environment: "node",
   },

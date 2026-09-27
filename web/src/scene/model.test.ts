@@ -62,7 +62,7 @@ describe("sceneModel", () => {
     expect(model.cards.map((c) => c.status)).toEqual(["graded", "graded", "graded"]);
     expect(model.finalBanner).toBe("JOB OK - GRADE 8 - $0.0624");
     expect(model.spent).toBe("SPENT $0.0624");
-    expect(model.review).toEqual({ text: "T3 9/10", tone: "ok" });
+    expect(model.review).toBeNull(); // the final banner has the grade now
     expect(model.reviewing).toBe(false);
     expect(model.mainAgent).toBe("SENT TIDES_EXPLAINER.MD");
   });

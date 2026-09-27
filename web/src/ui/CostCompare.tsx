@@ -1,4 +1,4 @@
-import { compareToTopModel, describeDelta, formatUsd } from "../state/costs";
+import { compareToTopModel, describeDelta, formatUsd } from "../state/money";
 import type { MarketState } from "../state/reducer";
 
 /** Header strip: what this job cost through Abyss vs the top model doing it all. */
@@ -32,6 +32,9 @@ export function CostCompare({ state }: { state: MarketState }) {
         <i className="cc-bar"><b style={{ width: `${share}%` }} /></i>
       </div>
       <em className={`cc-delta ${delta.tone}`}>{delta.text}</em>
+      <span className="sr-only">
+        Estimate: {cmp.topName} doing every task with the same work tokens, the same planning and review, and no bids.
+      </span>
     </div>
   );
 }

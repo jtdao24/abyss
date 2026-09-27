@@ -1,16 +1,17 @@
 // The Captain is a terminal: type a job (or a /command) at the prompt and the
 // market streams its progress back, line by line, like `python -m abyss.chat`.
-import { useEffect, useReducer, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
 
 import { sfx } from "../audio/sfx";
 import { api, type Attachment, type McpServer, type Provider, type SessionRecord, type SessionSummary } from "../api";
 import type { AbyssEvent, AgentId, ClientMsg } from "../contract";
-import type { MarketState } from "../state/reducer";
+import { formatUsd } from "../state/money";
+import { wasStopped, type MarketState } from "../state/reducer";
+import { describe, weakTasks, type Context, type Line, type Tone } from "./describeEvent";
+import { downloadText, openResult, resultDoc } from "./resultView";
+import { eventKey, nearBottom } from "./terminalScroll";
+import { useDialogFocus } from "./useDialogFocus";
 
-type Tone = "plain" | "dim" | "bold" | "cyan" | "green" | "yellow" | "red" | "echo";
-type Line = { text: string; tone: Tone };
-
-const VENDOR: Record<AgentId, string> = { opus: "Vendor 1", sonnet: "Vendor 2", haiku: "Vendor 3" };
 const STEER_TARGET: Record<string, "job" | AgentId> = {
   "1": "opus", v1: "opus", vendor1: "opus",
   "2": "sonnet", v2: "sonnet", vendor2: "sonnet",
@@ -33,6 +34,7 @@ const HELP: Line[] = [
   ["  /stop                       stop the running job (no new AI calls)", "plain"],
   ["  /queue  /unqueue <n>        jobs typed while one runs wait in line", "plain"],
   ["  /rerun [n]                  run a past session again (/sessions numbers)", "plain"],
+  ["  /retry [t2,t3] [n]          redo just those tasks, keep the rest (none named: the weak ones)", "plain"],
   ["  /price <0-5>                how much price matters (0 = quality only)", "plain"],
   ["  /budget <usd|off>           hard spending cap for your next job", "plain"],
   ["  /ai [name]                  pick the AI for your next job", "plain"],
@@ -40,85 +42,16 @@ const HELP: Line[] = [
   ["  /tools [on|off <name>|all]  which tool servers the vendors may use", "plain"],
   ["  /examples  /example <n>     sample jobs (puts one on the prompt)", "plain"],
   ["  /estimate                   what a typical job costs", "plain"],
-  ["  /result  /save              read or download the finished file", "plain"],
-  ["  /sessions  /open <n>        past sessions", "plain"],
+  ["  /result  /save              open or download the finished file", "plain"],
+  ["  /sessions  /open <n>        past sessions (open shows the file)", "plain"],
   ["  /status  /reset  /clear  /exit", "plain"],
   ["  ↑ ↓ recall earlier lines · Esc closes", "dim"],
 ].map(([text, tone]) => ({ text, tone: tone as Tone }));
 
-/** One event as terminal lines (the same wording as the Python terminal chat). */
-function describe(ev: AbyssEvent): Line[] {
-  switch (ev.type) {
-    case "hello": {
-      const c = ev.data.config;
-      const mode = c.fake_llm ? "FAKE MODE — no real AI calls" : !c.real_models ? "TEST MODE — every vendor on the budget model" : "LIVE — real models";
-      return [{ text: `connected to the market · ${mode}`, tone: "dim" }];
-    }
-    case "job_split":
-      return [
-        { text: `🧭 Main agent split the job into ${ev.data.tasks.length} tasks:`, tone: "bold" },
-        ...ev.data.tasks.map((t) => ({ text: `   ${t.task_id.toUpperCase()} ${t.type.padEnd(8)} ${t.title}`, tone: "plain" as Tone })),
-      ];
-    case "task_posted":
-      return [{ text: "", tone: "plain" }, { text: `→ ${ev.data.task_id.toUpperCase()} (${ev.data.type}): vendors are walking to the boat to bid`, tone: "cyan" }];
-    case "bid": {
-      const who = VENDOR[ev.data.agent_id];
-      if (!ev.data.ok) {
-        const standby = (ev.data.error ?? "").startsWith("standby");
-        return [{ text: `   ${who} ${standby ? "is on standby (backup only)" : "passed"}`, tone: "dim" }];
-      }
-      const cents = ((ev.data.predicted_cost_usd ?? 0) * 100).toFixed(2);
-      return [{ text: `   ${who} bids: promises ${ev.data.promised_quality}/10 for ${cents}¢ — "${ev.data.pitch}"`, tone: "dim" }];
-    }
-    case "won":
-      return [{ text: `   ✓ ${VENDOR[ev.data.agent_id]} wins ${ev.data.task_id.toUpperCase()}`, tone: "bold" }];
-    case "working":
-      return [{ text: `   ${VENDOR[ev.data.agent_id]} is working on it...`, tone: "dim" }];
-    case "done":
-      return [{ text: `   ${VENDOR[ev.data.agent_id]} finished (${ev.data.usage.output_tokens} tokens, $${ev.data.usage.cost_usd.toFixed(4)}) → off to the reviewer`, tone: "dim" }];
-    case "graded": {
-      const { grade, promised_quality: promised } = ev.data;
-      const tone: Tone = promised === null || grade >= promised ? "green" : grade < promised - 1 ? "red" : "yellow";
-      return [{ text: `   Reviewer: ${grade}/10${promised !== null ? ` (promised ${promised})` : ""} — ${ev.data.rationale}`, tone }];
-    }
-    case "rep_update": {
-      const delta = ev.data.new - ev.data.old;
-      return [{ text: `   ${VENDOR[ev.data.agent_id]} ${ev.data.task_type} reputation ${ev.data.old.toFixed(3)} → ${ev.data.new.toFixed(3)} ${delta > 0 ? "▲" : delta < 0 ? "▼" : "="}`, tone: "dim" }];
-    }
-    case "steered":
-      return [{ text: `   ✎ noted for ${ev.data.target === "job" ? "every vendor" : VENDOR[ev.data.target]}: "${ev.data.note}" (applies from their next piece of work)`, tone: "yellow" }];
-    case "assembled":
-      return [{ text: "", tone: "plain" }, { text: `📦 Main agent is packaging everything into ${ev.data.filename}`, tone: "bold" }];
-    case "final": {
-      const f = ev.data;
-      if (!f.deliverable || !f.filename) return [{ text: `✗ The job ended (${f.status}) without a file.`, tone: "red" }];
-      return [
-        { text: "", tone: "plain" },
-        { text: `✅ Done! Your file is ready: ${f.filename}  (/save downloads it, /result shows it)`, tone: "green" },
-        ...(f.summary ? [{ text: `   ${f.summary}`, tone: "plain" as Tone }] : []),
-        { text: `   mean grade ${f.mean_grade ?? "—"}/10 · total cost $${f.total_cost_usd.toFixed(4)} · ${(f.duration_ms / 1000).toFixed(1)}s`, tone: "dim" },
-      ];
-    }
-    case "error":
-      return [{ text: `   ⚠ ${ev.data.message}`, tone: "red" }];
-    default:
-      return [];
-  }
-}
-
-/** Save the finished file from the browser. */
-function download(filename: string, text: string): void {
-  const url = URL.createObjectURL(new Blob([text], { type: "text/plain;charset=utf-8" }));
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  link.click();
-  URL.revokeObjectURL(url);
-}
-
 // The terminal outlives its window: closing the Captain and coming back keeps
 // the scrollback, your settings and your command history.
 type Local = { id: number; after: AbyssEvent | null; lines: Line[] };
+const MAX_LOCAL = 300;
 const term = {
   nextId: 1,
   local: [] as Local[],
@@ -143,19 +76,39 @@ interface Props {
 }
 
 export function CaptainTerminal({ state, onClose, send, providers = [], sessions = [] }: Props) {
-  const [, rerender] = useReducer((n: number) => n + 1, 0);
+  // `version` changes whenever your own lines do (they live outside React state).
+  const [version, rerender] = useReducer((n: number) => n + 1, 0);
   const [input, setInput] = useState("");
   const [historyAt, setHistoryAt] = useState<number | null>(null);
   const screen = useRef<HTMLDivElement | null>(null);
   const field = useRef<HTMLInputElement | null>(null);
   const filePicker = useRef<HTMLInputElement | null>(null);
+  const dialog = useRef<HTMLDivElement | null>(null);
+  useDialogFocus(dialog); // the prompt gets focus; closing hands it back
   const live = Boolean(send);
   const running = state.jobActive;
 
-  const print = (...lines: (Line | string)[]) => {
+  const toLines = (lines: (Line | string)[]): Line[] => lines.map((l) => (typeof l === "string" ? { text: l, tone: "plain" } : l));
+  const print = (...lines: (Line | string)[]): Local => {
     const last = state.log.at(-1) ?? null;
-    term.local.push({ id: term.nextId++, after: last, lines: lines.map((l) => (typeof l === "string" ? { text: l, tone: "plain" } : l)) });
+    const entry: Local = { id: term.nextId++, after: last, lines: toLines(lines) };
+    term.local.push(entry);
+    // The market's own log keeps its last 200 events; keep your lines bounded too.
+    if (term.local.length > MAX_LOCAL) term.local.splice(0, term.local.length - MAX_LOCAL);
     rerender();
+    return entry;
+  };
+  /**
+   * For commands that answer later (a fetch): print a placeholder now and fill
+   * it in place when the answer comes, so the reply sits under its command
+   * instead of after whatever you typed next.
+   */
+  const later = (what: string) => {
+    const entry = print({ text: `${what}…`, tone: "dim" });
+    return (...lines: (Line | string)[]) => {
+      entry.lines = toLines(lines);
+      rerender();
+    };
   };
 
   // A welcome the first time the terminal opens.
@@ -166,39 +119,37 @@ export function CaptainTerminal({ state, onClose, send, providers = [], sessions
         live ? { text: "Type a job below and press Enter.", tone: "dim" } : { text: "This is a replay: you can watch and read, but not start jobs.", tone: "dim" },
       );
     }
-    field.current?.focus();
     if (live) api.mcp().then((v) => (term.toolServers = v.servers.filter((s) => s.state === "ready"))).catch(() => undefined);
   }, []);
 
-  // Stay pinned to the newest line while the market talks (unless you scrolled up).
-  const lineCount = state.log.length + term.local.length;
-  useEffect(() => {
+  // Stay pinned to the newest line while the market talks, unless you scrolled up.
+  // "Were you at the bottom" is measured when you scroll, not after lines arrive:
+  // a burst taller than the slack (the job's plan) would otherwise unpin it.
+  const pinned = useRef(true);
+  useLayoutEffect(() => {
     const el = screen.current;
-    if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 80) el.scrollTop = el.scrollHeight;
-  }, [lineCount]);
-  useEffect(() => {
-    if (screen.current) screen.current.scrollTop = screen.current.scrollHeight;
-  }, []);
+    if (el && pinned.current) el.scrollTop = el.scrollHeight;
+  });
 
   const attach = async (make: () => Promise<Attachment>, what: string) => {
-    print({ text: `reading ${what}…`, tone: "dim" });
+    const answer = later(`reading ${what}`);
     try {
       const added = await make();
       term.attachments = [...term.attachments.filter((a) => a.id !== added.id), added].slice(0, 5);
-      print({ text: `attached ${added.name} (${added.chars.toLocaleString()} chars) to your next job`, tone: "green" });
+      answer({ text: `attached ${added.name} (${added.chars.toLocaleString()} chars) to your next job`, tone: "green" });
     } catch (error) {
-      print({ text: `couldn't attach that: ${error instanceof Error ? error.message : "unknown error"}`, tone: "red" });
+      answer({ text: `couldn't attach that: ${error instanceof Error ? error.message : "unknown error"}`, tone: "red" });
     }
   };
 
   const stop = () => {
     if (needLive()) return;
     if (!running) return print({ text: "no job is running to stop", tone: "yellow" });
-    send!({ type: "stop_job" });
-    print({ text: "stopping: the crew finishes what's in hand, then no new AI calls", tone: "yellow" });
+    // The server's "Stopping" note confirms it (every open window sees that).
+    if (!send!({ type: "stop_job" })) print({ text: "couldn't send that: the connection dropped", tone: "red" });
   };
 
-  const rerun = (record: SessionRecord) => {
+  const rerun = (record: SessionRecord): Line[] => {
     const sent = send!({
       type: "start_job",
       job: record.job_text,
@@ -208,8 +159,8 @@ export function CaptainTerminal({ state, onClose, send, providers = [], sessions
       ...(record.tools ? { tools: record.tools } : {}),
       ...(running ? { queue: true } : {}),
     });
-    if (!sent) return print({ text: "couldn't send that: the connection dropped", tone: "red" });
-    print({ text: `${running ? "queued" : "running"} again: "${record.job_text.slice(0, 70)}" (same AI, budget, tools and files)`, tone: "dim" });
+    if (!sent) return [{ text: "couldn't send that: the connection dropped", tone: "red" }];
+    return [{ text: `${running ? "queued" : "running"} again: "${record.job_text.slice(0, 70)}" (same AI, budget, tools and files)`, tone: "dim" }];
   };
 
   const needLive = () => {
@@ -306,23 +257,24 @@ export function CaptainTerminal({ state, onClose, send, providers = [], sessions
         if (needLive()) return;
         const [action, ...nameParts] = rest.split(" ");
         const name = nameParts.join(" ").trim().toLowerCase();
+        const answer = later("checking the tool servers");
         api.mcp().then(
           (v) => {
             term.toolServers = v.servers.filter((t) => t.state === "ready");
             const find = () => term.toolServers.find((t) => t.name.toLowerCase() === name || t.label.toLowerCase() === name);
             if (action === "all") {
               term.toolsOff = [];
-              return print({ text: "every tool server is on for your next job", tone: "dim" });
+              return answer({ text: "every tool server is on for your next job", tone: "dim" });
             }
             if (action === "on" || action === "off") {
               const server = find();
-              if (!server) return print({ text: `no connected tool server called "${name}" (try /tools)`, tone: "red" });
+              if (!server) return answer({ text: `no connected tool server called "${name}" (try /tools)`, tone: "red" });
               term.toolsOff = action === "off" ? [...new Set([...term.toolsOff, server.name])] : term.toolsOff.filter((n) => n !== server.name);
-              return print({ text: `${server.label} is ${action} for your next job`, tone: "dim" });
+              return answer({ text: `${server.label} is ${action} for your next job`, tone: "dim" });
             }
-            if (action) return print({ text: "usage: /tools, /tools on <name>, /tools off <name>, /tools all", tone: "red" });
-            if (!term.toolServers.length) return print({ text: "no tool servers connected (add some with the Tools button)", tone: "dim" });
-            print(
+            if (action) return answer({ text: "usage: /tools, /tools on <name>, /tools off <name>, /tools all", tone: "red" });
+            if (!term.toolServers.length) return answer({ text: "no tool servers connected (add some with the Tools button)", tone: "dim" });
+            answer(
               ...term.toolServers.map((t) => ({
                 text: `  ${term.toolsOff.includes(t.name) ? "·" : "✓"} ${t.name} — ${t.label} (${t.tools.length} tools)${term.toolsOff.includes(t.name) ? ", off" : ""}`,
                 tone: (term.toolsOff.includes(t.name) ? "dim" : "plain") as Tone,
@@ -330,7 +282,7 @@ export function CaptainTerminal({ state, onClose, send, providers = [], sessions
               { text: "/tools off <name> leaves one out of your next job", tone: "dim" },
             );
           },
-          () => print({ text: "couldn't reach the tool servers", tone: "red" }),
+          () => answer({ text: "couldn't reach the tool servers", tone: "red" }),
         );
         return;
       }
@@ -342,13 +294,15 @@ export function CaptainTerminal({ state, onClose, send, providers = [], sessions
         setInput(pick);
         return rerender();
       }
-      case "estimate":
+      case "estimate": {
         if (needLive()) return;
+        const answer = later("estimating");
         api.estimate(term.provider).then(
-          (e) => print({ text: `a typical ${e.tasks}-task job costs about $${e.low_usd.toFixed(4)}–$${e.high_usd.toFixed(4)} (${e.calls} AI calls)`, tone: "dim" }),
-          () => print({ text: "couldn't get an estimate", tone: "red" }),
+          (e) => answer({ text: `a typical ${e.tasks}-task job costs about ${formatUsd(e.low_usd)}–${formatUsd(e.high_usd)} (${e.calls} AI calls)`, tone: "dim" }),
+          () => answer({ text: "couldn't get an estimate", tone: "red" }),
         );
         return;
+      }
       case "steer": {
         if (needLive()) return;
         const [who, ...noteParts] = rest.split(" ");
@@ -361,34 +315,72 @@ export function CaptainTerminal({ state, onClose, send, providers = [], sessions
       }
       case "stop":
         return stop();
-      case "queue":
+      case "queue": {
         if (needLive()) return;
+        const answer = later("reading the queue");
         api.queue().then(
           (q) => {
-            if (!q.queue.length) return print({ text: "nothing queued", tone: "dim" });
-            print(...q.queue.map((item, i) => `  ${i + 1}. ${item.job.slice(0, 70)}`), { text: "/unqueue <n> removes one", tone: "dim" });
+            if (!q.queue.length) return answer({ text: "nothing queued", tone: "dim" });
+            answer(...q.queue.map((item, i) => `  ${i + 1}. ${item.job.slice(0, 70)}`), { text: "/unqueue <n> removes one", tone: "dim" });
           },
-          () => print({ text: "couldn't read the queue", tone: "red" }),
+          () => answer({ text: "couldn't read the queue", tone: "red" }),
         );
         return;
+      }
       case "unqueue": {
         if (needLive()) return;
         const n = Number(rest);
-        api.queue().then((q) => {
-          const item = q.queue[n - 1];
-          if (!item) return print({ text: "usage: /unqueue <n> (see /queue)", tone: "red" });
-          api.dequeue(item.id).then(
-            () => print({ text: `removed "${item.job.slice(0, 60)}" from the queue`, tone: "dim" }),
-            () => print({ text: "couldn't remove it", tone: "red" }),
-          );
-        });
+        const answer = later("reading the queue");
+        api.queue().then(
+          (q) => {
+            const item = q.queue[n - 1];
+            if (!item) return answer({ text: "usage: /unqueue <n> (see /queue)", tone: "red" });
+            api.dequeue(item.id).then(
+              () => answer({ text: `removed "${item.job.slice(0, 60)}" from the queue`, tone: "dim" }),
+              () => answer({ text: "couldn't remove it", tone: "red" }),
+            );
+          },
+          () => answer({ text: "couldn't read the queue", tone: "red" }),
+        );
+        return;
+      }
+      case "retry": {
+        if (needLive()) return;
+        // /retry            the latest session's weak tasks
+        // /retry t2,t3      those tasks of the latest session
+        // /retry t2 3       task t2 of session 3 (see /sessions)
+        const parts = rest.split(/\s+/).filter(Boolean);
+        const named = parts.filter((p) => /^t\d+(,t\d+)*$/i.test(p)).flatMap((p) => p.toLowerCase().split(","));
+        const number = parts.find((p) => /^\d+$/.test(p));
+        const s = sessions[(number ? Number(number) : 1) - 1];
+        if (!s) return print({ text: "usage: /retry [t2,t3] [n] (see /sessions; no number = the latest)", tone: "red" });
+        const answer = later("loading that session");
+        api.session(s.id).then(
+          (record) => {
+            if (!record.plan?.length) return answer({ text: "that session was saved before retries existed: /rerun runs the whole job again", tone: "yellow" });
+            const ids = named.length ? named : weakTasks(record.final?.tasks ?? []);
+            if (!ids.length) return answer({ text: "every task met its promise: name one to redo anyway, like /retry t2", tone: "dim" });
+            const sent = send!({ type: "retry_task", session_id: s.id, task_ids: ids, ...(running ? { queue: true } : {}) });
+            if (!sent) return answer({ text: "couldn't send that: the connection dropped", tone: "red" });
+            const titles = ids.map((id) => {
+              const task = record.plan!.find((p) => p.task_id === id);
+              return task ? `${id.toUpperCase()} (${task.title})` : id.toUpperCase();
+            });
+            answer({ text: `${running ? "queued: " : ""}redoing ${titles.join(", ")}; the other tasks keep their work, free`, tone: "dim" });
+          },
+          () => answer({ text: "couldn't load that session", tone: "red" }),
+        );
         return;
       }
       case "rerun": case "again": {
         if (needLive()) return;
         const s = sessions[(rest ? Number(rest) : 1) - 1];
         if (!s) return print({ text: "usage: /rerun [n] (see /sessions; no number = the latest)", tone: "red" });
-        api.session(s.id).then(rerun, () => print({ text: "couldn't load that session", tone: "red" }));
+        const answer = later("loading that session");
+        api.session(s.id).then(
+          (record) => answer(...rerun(record)),
+          () => answer({ text: "couldn't load that session", tone: "red" }),
+        );
         return;
       }
       case "reset":
@@ -396,33 +388,35 @@ export function CaptainTerminal({ state, onClose, send, providers = [], sessions
         send!({ type: "reset" });
         return print({ text: "reputations reset", tone: "dim" });
       case "result": {
-        const f = state.final;
-        if (!f?.deliverable) return print({ text: "no finished file yet", tone: "dim" });
-        return print({ text: `── ${f.filename ?? "result"} ──`, tone: "cyan" }, ...f.deliverable.split("\n"), { text: "── end ──", tone: "cyan" });
+        const last = [...state.history].reverse().find((h) => h.final.deliverable);
+        if (!last) return print({ text: "no finished file yet", tone: "dim" });
+        openResult(resultDoc(last.final, last.jobText, wasStopped(state, last.jobId)));
+        return print({ text: `opened ${last.final.filename ?? "result.md"}`, tone: "dim" });
       }
       case "save": {
-        const f = state.final;
+        const f = [...state.history].reverse().find((h) => h.final.deliverable)?.final;
         if (!f?.deliverable) return print({ text: "no finished file yet", tone: "dim" });
-        download(f.filename ?? "result.md", f.deliverable);
+        downloadText(f.filename ?? "result.md", f.deliverable);
         return print({ text: `downloading ${f.filename ?? "result.md"}`, tone: "green" });
       }
       case "sessions":
         if (!sessions.length) return print({ text: "no saved sessions yet", tone: "dim" });
         return print(
           ...sessions.slice(0, 10).map((s, i) => `  ${i + 1}. ${s.job_text.slice(0, 60)}${s.job_text.length > 60 ? "…" : ""}  · $${s.cost_usd.toFixed(4)}${s.mean_grade != null ? ` · ${s.mean_grade}/10` : ""}`),
-          { text: "/open <n> shows one · /rerun <n> runs it again", tone: "dim" },
+          { text: "/open <n> shows one · /rerun <n> runs it again · /retry t2 <n> redoes one task", tone: "dim" },
         );
       case "open": {
         const s = sessions[Number(rest) - 1];
         if (!s) return print({ text: "usage: /open <n> (see /sessions)", tone: "red" });
+        const answer = later("loading that session");
         api.session(s.id).then(
           (record) => {
             const f = record.final;
-            print({ text: `── ${record.job_text} ──`, tone: "cyan" });
-            if (!f?.deliverable) return print({ text: `this session ended without a file (${record.status})`, tone: "dim" });
-            print(...f.deliverable.split("\n"), { text: `── ${f.filename ?? "result"} · grade ${f.mean_grade ?? "—"}/10 · $${f.total_cost_usd.toFixed(4)} ──`, tone: "cyan" });
+            if (!f?.deliverable) return answer({ text: `this session ended without a file (${record.status})`, tone: "dim" });
+            openResult(resultDoc(f, record.job_text, Boolean(record.stopped) || record.status === "stopped"));
+            answer({ text: `opened ${f.filename ?? "result.md"} from "${record.job_text.slice(0, 60)}"`, tone: "dim" });
           },
-          () => print({ text: "couldn't load that session", tone: "red" }),
+          () => answer({ text: "couldn't load that session", tone: "red" }),
         );
         return;
       }
@@ -432,25 +426,11 @@ export function CaptainTerminal({ state, onClose, send, providers = [], sessions
   };
 
   // Scrollback: every event's lines, with your own lines placed after the event they followed.
-  const rows: ReactNode[] = [];
-  const localByEvent = new Map<AbyssEvent | null, Local[]>();
-  const shownEvents = new Set(state.log);
-  for (const l of term.local) {
-    if (l.id < term.clearedAfterId) continue;
-    const key = l.after && shownEvents.has(l.after) ? l.after : null;
-    localByEvent.set(key, [...(localByEvent.get(key) ?? []), l]);
-  }
-  const pushLines = (key: string, lines: Line[]) =>
-    lines.forEach((line, i) => rows.push(<div key={`${key}-${i}`} className={`t-${line.tone}`}>{line.text || " "}</div>));
-  localByEvent.get(null)?.forEach((l) => pushLines(`l${l.id}`, l.lines));
-  const clearedAt = term.clearedAfterEvent ? state.log.indexOf(term.clearedAfterEvent) : -1;
-  state.log.forEach((ev, index) => {
-    if (index > clearedAt) pushLines(`e${ev.seq}-${index}`, describe(ev));
-    localByEvent.get(ev)?.forEach((l) => pushLines(`l${l.id}`, l.lines));
-  });
+  // Rebuilt only when the log or your lines change, not on every keystroke.
+  const rows = useMemo(() => scrollback(state.log, state.stopped), [state.log, state.stopped, version]);
 
   return (
-    <div className="rpg-dialog captain-term" role="dialog" aria-label="Captain terminal" onPointerDown={(e) => e.stopPropagation()}>
+    <div ref={dialog} className="rpg-dialog captain-term" role="dialog" aria-label="Captain terminal" onPointerDown={(e) => e.stopPropagation()}>
       <div className="ct-bar">
         <span className="ct-dots"><i /><i /><i /></span>
         <strong>captain@abyss</strong>
@@ -462,7 +442,13 @@ export function CaptainTerminal({ state, onClose, send, providers = [], sessions
         )}
         <button type="button" onClick={onClose} aria-label="Close">×</button>
       </div>
-      <div className="ct-screen" ref={screen} onClick={() => window.getSelection()?.isCollapsed && field.current?.focus()} aria-live="polite">
+      <div
+        className="ct-screen"
+        ref={screen}
+        onScroll={(e) => (pinned.current = nearBottom(e.currentTarget))}
+        onClick={() => window.getSelection()?.isCollapsed && field.current?.focus()}
+        aria-live="polite"
+      >
         {rows}
       </div>
       <form
@@ -470,6 +456,7 @@ export function CaptainTerminal({ state, onClose, send, providers = [], sessions
         onSubmit={(e) => {
           e.preventDefault();
           if (input.trim()) (/^\/stop\b/.test(input.trim()) ? sfx.stop : sfx.submit)();
+          pinned.current = true; // typing something takes you back to the newest line
           run(input);
           setInput("");
           setHistoryAt(null);
@@ -478,6 +465,7 @@ export function CaptainTerminal({ state, onClose, send, providers = [], sessions
         <span>you ›</span>
         <input
           ref={field}
+          data-autofocus
           value={input}
           spellCheck={false}
           autoComplete="off"
@@ -508,4 +496,41 @@ export function CaptainTerminal({ state, onClose, send, providers = [], sessions
       />
     </div>
   );
+}
+
+/** Every event's lines, with your own lines placed after the event they followed. */
+function scrollback(log: AbyssEvent[], stopped: string[]): ReactNode[] {
+  const rows: ReactNode[] = [];
+  const localByEvent = new Map<AbyssEvent | null, Local[]>();
+  const shownEvents = new Set(log);
+  for (const l of term.local) {
+    if (l.id < term.clearedAfterId) continue;
+    const key = l.after && shownEvents.has(l.after) ? l.after : null;
+    localByEvent.set(key, [...(localByEvent.get(key) ?? []), l]);
+  }
+  const pushLines = (key: string, lines: Line[]) =>
+    lines.forEach((line, i) =>
+      rows.push(
+        <div key={`${key}-${i}`} className={`t-${line.tone}`}>
+          {line.text || " "}
+          {line.action && (
+            <button type="button" className="ct-action" onClick={line.action.run}>
+              {line.action.label}
+            </button>
+          )}
+        </div>,
+      ),
+    );
+  const ctx: Context = {
+    stopped: new Set(stopped),
+    said: new Set(),
+    jobText: new Map(log.filter((e) => e.type === "job_split" && e.job_id).map((e) => [e.job_id!, (e.data as { job_text: string }).job_text])),
+  };
+  localByEvent.get(null)?.forEach((l) => pushLines(`l${l.id}`, l.lines));
+  const clearedAt = term.clearedAfterEvent ? log.indexOf(term.clearedAfterEvent) : -1;
+  log.forEach((ev, index) => {
+    if (index > clearedAt) pushLines(`e${eventKey(ev)}`, describe(ev, ctx));
+    localByEvent.get(ev)?.forEach((l) => pushLines(`l${l.id}`, l.lines));
+  });
+  return rows;
 }

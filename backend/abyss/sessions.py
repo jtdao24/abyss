@@ -45,6 +45,11 @@ class SessionStore:
         """The market is about to start this job; its job_id arrives with job_split."""
         self._pending = (job_text, provider, budget_usd, list(attachments or []), tools)
         self._pending_ids = list(attachment_ids or [])
+        self._pending_retry: str | None = None
+
+    def expect_retry(self, source_id: str) -> None:
+        """The next job redoes tasks of `source_id` (it runs the same plan)."""
+        self._pending_retry = source_id
 
     def observe(self, event: dict) -> None:
         job_id = event.get("job_id")
@@ -55,6 +60,7 @@ class SessionStore:
             if kind == "job_split":
                 text, provider, budget, attached, tool_servers = self._pending or ("", None, None, [], None)
                 self._pending = None
+                retry_of, self._pending_retry = getattr(self, "_pending_retry", None), None
                 self._write(job_id, {
                     "id": job_id,
                     "job_text": text,
@@ -63,6 +69,9 @@ class SessionStore:
                     "attachments": attached,
                     "tools": tool_servers,  # MCP servers allowed (None: all)
                     "attachment_ids": getattr(self, "_pending_ids", []),  # so a re-run gets them too
+                    "plan": (event.get("data") or {}).get("tasks") or [],  # so single tasks can be retried
+                    "outputs": {},  # task id -> finished work (from done events)
+                    "retry_of": retry_of,
                     "bids": {},          # agent -> bids actually placed
                     "rep_updates": [],   # every reputation change, in order
                     "status": "running",
@@ -79,6 +88,11 @@ class SessionStore:
                     bids = record.setdefault("bids", {})
                     bids[agent] = bids.get(agent, 0) + 1
                     self._write(job_id, record)
+            elif kind == "done":
+                record = self.get(job_id)
+                if record is not None:
+                    record.setdefault("outputs", {})[event["data"]["task_id"]] = event["data"]["output"]
+                    self._write(job_id, record)
             elif kind == "rep_update":
                 record = self.get(job_id)
                 if record is not None:
@@ -88,6 +102,8 @@ class SessionStore:
                         "task_type": data["task_type"], "old": data["old"], "new": data["new"], "ratio": data["ratio"],
                     })
                     self._write(job_id, record)
+            elif kind == "steered" and (event.get("data") or {}).get("note", "").startswith("Stop:"):
+                self._update(job_id, stopped=True)  # the user pressed Stop (the final is still partial/ok)
             elif kind == "final":
                 data = event.get("data") or {}
                 self._update(job_id, final=data, status=data.get("status", "ok"), finished_at=time.time())
