@@ -116,7 +116,7 @@ export default function App() {
       scene.onInteract = (id) => openDialog(id);
       scene.onGround = () => openDialog(null);
       directorRef.current = new Director(created, SPEED);
-      if (import.meta.env.DEV) (window as unknown as { __abyss: unknown }).__abyss = { scene: created, store };
+      if (import.meta.env.DEV) (window as unknown as { __abyss: unknown }).__abyss = { scene: created, store, director: directorRef.current };
       scene.render(store.getState());
       unsubscribe = store.subscribe(() => scene?.render(store.getState()));
       setSceneReady(true);
