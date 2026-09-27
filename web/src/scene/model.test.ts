@@ -21,7 +21,7 @@ describe("sceneModel", () => {
     const state = stateAfter((ev) => ev.type === "bid" && ev.data.agent_id === "haiku");
     const model = sceneModel(state);
     const bubbles = Object.fromEntries(model.stalls.map((s) => [s.agentId, s.bubble?.text]));
-    expect(bubbles).toEqual({ haiku: "Q9 0.08¢", sonnet: "...", opus: "..." });
+    expect(bubbles).toEqual({ haiku: "Q9 0.02¢", sonnet: "...", opus: "STANDBY" });
     expect(model.stalls.every((s) => !s.winner)).toBe(true);
     expect(model.banner).toBe("T1 RESEARCH - Gather the tide physics");
   });
@@ -52,8 +52,8 @@ describe("sceneModel", () => {
   it("ends with every card graded, the final banner, and the fixture total", () => {
     const model = sceneModel(events.reduce(reduce, initialState));
     expect(model.cards.map((c) => c.status)).toEqual(["graded", "graded", "graded"]);
-    expect(model.finalBanner).toBe("JOB OK - GRADE 8 - $0.0445");
-    expect(model.spent).toBe("SPENT $0.0445");
+    expect(model.finalBanner).toBe("JOB OK - GRADE 8 - $0.0624");
+    expect(model.spent).toBe("SPENT $0.0624");
     expect(model.review).toEqual({ text: "T3 9/10", tone: "ok" });
     expect(model.reviewing).toBe(false);
     expect(model.mainAgent).toBe("SENT TIDES_EXPLAINER.MD");

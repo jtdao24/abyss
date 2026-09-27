@@ -52,7 +52,7 @@ async def request_bid(
     result = await llm.call(
         ledger=ledger,
         purpose="bid",
-        nominal_model=agent.model,
+        nominal_model=config.BID_MODEL,
         system=prompts.BID_SYSTEM,
         user=prompts.BID_USER.format(
             # The model this stall really runs on for the session's AI (e.g. "GPT-5 mini").

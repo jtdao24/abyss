@@ -71,7 +71,7 @@ async def test_fake_shapes_and_ledger(monkeypatch, purpose: str) -> None:
 
     assert isinstance(result.text, str)
     assert (result.data is None) == (purpose == "work")
-    assert result.usage["model"] == "gpt-5"  # the standard tier on OpenAI
+    assert result.usage["model"] == "gpt-6-sol"  # the standard tier on OpenAI
     assert result.usage["output_tokens"] >= 150
     assert len(ledger.entries()) == 1
     assert ledger.entries()[0].purpose == purpose
@@ -118,7 +118,7 @@ async def test_real_request_in_test_mode_uses_the_budget_model(monkeypatch) -> N
     )
 
     request = client.completions.calls[0]
-    assert request["model"] == "gpt-5-mini"  # conftest runs in test mode
+    assert request["model"] == "gpt-6-luna"  # conftest runs in test mode
     assert request["response_format"] == {"type": "json_object"}
     assert request["reasoning_effort"] == "low"
     assert "Respond with only a JSON object" in request["messages"][0]["content"]
@@ -136,7 +136,7 @@ async def test_real_models_use_each_tiers_model(monkeypatch) -> None:
             ledger=Ledger("j_00000001", None), purpose="work", nominal_model=tier,
             system="s", user="u", max_tokens=100, task_id="t1", agent_id="opus",
         )
-    assert [c["model"] for c in client.completions.calls] == ["gpt-5", "gpt-5-mini"]
+    assert [c["model"] for c in client.completions.calls] == ["gpt-6-astra", "gpt-6-luna"]
 
 
 @pytest.mark.asyncio

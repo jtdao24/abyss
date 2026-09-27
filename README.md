@@ -34,10 +34,10 @@ Abyss runs on **OpenAI** or **Meta Muse Spark**. Every run makes real AI calls, 
 
 | vendor | OpenAI | Meta |
 |---|---|---|
-| Vendor 3 (budget) | GPT-5 mini | Muse Spark 1.3 |
-| Vendor 2 (premium) | GPT-5 | Muse Spark 1.3 |
-| Vendor 1 (premium) | GPT-5 | Muse Spark 1.3 |
-| Main agent, reviewer | GPT-5 | Muse Spark 1.3 |
+| Vendor 3 (budget) | GPT-6 Luna | Muse Spark 1.3 |
+| Vendor 2 (standard) | GPT-6 Sol | Muse Spark 1.3 |
+| Vendor 1 (premium) | GPT-6 Astra | Muse Spark 1.3 |
+| Main agent, reviewer | GPT-6 Sol | Muse Spark 1.3 |
 
 | command | what it does |
 |---|---|

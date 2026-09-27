@@ -15,23 +15,28 @@ Abyss runs on **OpenAI** or **Meta Muse Spark** (`ABYSS_PROVIDER`, or picked per
 
 | agent_id | stall | tier | OpenAI | Meta | color |
 |---|---|---|---|---|---|
-| `haiku` | VENDOR 3 | `budget` | `gpt-5-mini` | `muse-spark-1.3` | `#4fb3a9` |
-| `sonnet` | VENDOR 2 | `standard` | `gpt-5` | `muse-spark-1.3` | `#e8a33d` |
-| `opus` | VENDOR 1 | `premium` | `gpt-5` | `muse-spark-1.3` | `#8e6cc9` |
+| `haiku` | VENDOR 3 | `budget` | `gpt-6-luna` | `muse-spark-1.3` | `#4fb3a9` |
+| `sonnet` | VENDOR 2 | `standard` | `gpt-6-sol` | `muse-spark-1.3` | `#e8a33d` |
+| `opus` | VENDOR 1 | `premium` | `gpt-6-astra` | `muse-spark-1.3` | `#8e6cc9` |
 
-The agent ids are frozen contract ids (they don't name models). `hello.agents[].display_name` and `.model` carry the served model for the default AI (e.g. "GPT-5 mini", `gpt-5-mini`). Tier models are overridable: `ABYSS_OPENAI_CHEAP` / `_MID` / `_TOP`, `ABYSS_META_CHEAP` / `_MID` / `_TOP`.
+The agent ids are frozen contract ids (they don't name models). `hello.agents[].display_name` and `.model` carry the served model for the default AI (e.g. "GPT-6 Luna", `gpt-6-luna`). Tier models are overridable: `ABYSS_OPENAI_CHEAP` / `_MID` / `_TOP`, `ABYSS_META_CHEAP` / `_MID` / `_TOP`.
 
 Non-agent roles: **orchestrator** and **reviewer** both use the `standard` tier. They are not agents: they never bid and have no reputation.
+
+Bids: the `budget` tier writes every stall's bid (`config.BID_MODEL`), so a quote never costs a premium call. The quote is still priced at the stall's own model, so scoring is unchanged. Bid ledger rows keep the stall's `agent_id`, with `model` set to the budget model.
+
+Premium backup: the `premium` stall only bids on a task when every cheaper stall's reputation for that task type is below `PREMIUM_BACKUP_BELOW` (0.9), when every cheaper bid fails, or when `price_weight` is 0. Otherwise it makes no call and sends a `bid` with `ok: false` and an `error` starting with `standby:`.
 
 ### 1.2 Prices (USD per 1M tokens)
 
 | model | input | output |
 |---|---|---|
-| `gpt-5-mini` | 0.25 | 2.00 |
-| `gpt-5` | 1.25 | 10.00 |
+| `gpt-6-luna` | 0.10 | 0.50 |
+| `gpt-6-sol` | 2.00 | 10.00 |
+| `gpt-6-astra` | 10.00 | 50.00 |
 | `muse-spark-1.3` | 1.25 | 4.25 |
 
-More models (gpt-5-nano, gpt-4.1*, gpt-4o*, the Muse contributor tier) are priced in `config.py`; an unknown model is priced at 2.00 / 10.00. Reasoning effort (`reasoning_effort`) is sent to both AIs.
+More models (gpt-5*, gpt-4.1*, gpt-4o*, the Muse contributor tier) are priced in `config.py`; an unknown model is priced at 2.00 / 10.00. Reasoning effort (`reasoning_effort`) is sent to both AIs.
 
 Cache reads cost 0.1× the input price and cache writes cost 1.25× the input price. We don't plan to use caching, but the ledger records both fields anyway.
 
@@ -188,7 +193,7 @@ type Usage = {                // one LLM call, from resp.usage
 
 | type | data |
 |---|---|
-| `hello` | `{ agents: [{agent_id, display_name, model, color}], reputation: {[AgentId]: {[TaskType]: number}}, config: {price_weight, rep_init, rep_alpha, task_types: TaskType[], real_models: bool, fake_llm: bool, orchestrator_model, reviewer_model} }`. Sent on connect, and again after `reset`. |
+| `hello` | `{ agents: [{agent_id, display_name, model, color}], reputation: {[AgentId]: {[TaskType]: number}}, config: {price_weight, rep_init, rep_alpha, task_types: TaskType[], real_models: bool, fake_llm: bool, orchestrator_model, reviewer_model, prices: {[model]: [usd_per_M_input, usd_per_M_output]}} }`. `prices` covers every model in play (optional; older recordings omit it). Sent on connect, and again after `reset`. |
 | `job_split` | `{ job_text, tasks: [{task_id, type, title, brief, depends_on: string[]}], price_weight, usage: Usage }`. `task_id`s are `t1..tN` in execution order. `depends_on` only references earlier tasks. |
 | `task_posted` | `{ task_id, type, title, brief, depends_on, index, total, est_input_tokens }`. The task is open for bidding. `index` is 0-based. |
 | `bid` | `{ task_id, agent_id, ok, error: string\|null, predicted_output_tokens, est_input_tokens, predicted_cost_usd, promised_quality, pitch, reputation, score, usage: Usage\|null }`. When `ok:false`, the bid fields are `null`. `reputation` is the value used in the score. |

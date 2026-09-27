@@ -58,6 +58,9 @@ class HelloConfig(ContractModel):
     fake_llm: StrictBool
     orchestrator_model: str
     reviewer_model: str
+    # USD per million (input, output) tokens for every model in play. Optional
+    # so recordings made before it existed still validate.
+    prices: dict[str, tuple[NonNegativeFloat, NonNegativeFloat]] = Field(default_factory=dict)
 
 
 class HelloData(ContractModel):

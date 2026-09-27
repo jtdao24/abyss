@@ -55,9 +55,9 @@ def test_dotenv_fills_only_unset_vars(monkeypatch, tmp_path) -> None:
 
 def test_tiers_test_mode_and_fallback_price(monkeypatch) -> None:
     monkeypatch.delenv("ABYSS_REAL_MODELS", raising=False)
-    assert config.served_model("openai", "premium") == "gpt-5-mini"  # test mode: all cheap
+    assert config.served_model("openai", "premium") == "gpt-6-luna"  # test mode: all cheap
     monkeypatch.setenv("ABYSS_REAL_MODELS", "1")
-    assert config.served_model("openai", "premium") == "gpt-5"
+    assert config.served_model("openai", "premium") == "gpt-6-astra"
     assert config.served_model("meta", "budget") == "muse-spark-1.3"
     monkeypatch.setenv("ABYSS_OPENAI_MID", "some-new-model")
     assert config.served_model("openai", "standard") == "some-new-model"
@@ -84,13 +84,13 @@ async def test_openai_request_usage_and_price(real_calls) -> None:
         user="output", max_tokens=200, effort="low", schema=SCHEMA,
     )
     request = completions.requests[0]
-    assert request["model"] == "gpt-5-mini"
+    assert request["model"] == "gpt-6-luna"
     assert request["response_format"] == {"type": "json_object"}
     assert request["reasoning_effort"] == "low" and request["max_completion_tokens"] > 200
     assert "JSON schema" in request["messages"][0]["content"]
     assert result.data == {"grade": 8}
     assert result.usage["input_tokens"] == 1000  # cached tokens counted separately
-    expected = (1000 * 0.25 + 300 * 2.00 + 200 * 0.25 * 0.1) / 1_000_000
+    expected = (1000 * 0.10 + 300 * 0.50 + 200 * 0.10 * 0.1) / 1_000_000
     assert result.usage["cost_usd"] == pytest.approx(expected, abs=1e-6)
 
 
@@ -186,8 +186,13 @@ def test_the_market_shows_openai_and_muse_models(monkeypatch) -> None:
     monkeypatch.setenv("ABYSS_PROVIDER", "openai")
     hello = hello_data(ReputationStore(None))
     names = {a["agent_id"]: (a["display_name"], a["model"]) for a in hello["agents"]}
-    assert names == {"haiku": ("GPT-5 mini", "gpt-5-mini"), "sonnet": ("GPT-5", "gpt-5"), "opus": ("GPT-5", "gpt-5")}
-    assert hello["config"]["orchestrator_model"] == "gpt-5"
+    assert names == {
+        "haiku": ("GPT-6 Luna", "gpt-6-luna"),
+        "sonnet": ("GPT-6 Sol", "gpt-6-sol"),
+        "opus": ("GPT-6 Astra", "gpt-6-astra"),
+    }
+    assert hello["config"]["orchestrator_model"] == "gpt-6-sol"
+    assert hello["config"]["prices"]["gpt-6-astra"] == [10.00, 50.00]
     monkeypatch.setenv("ABYSS_PROVIDER", "meta")
     assert {a["model"] for a in hello_data(ReputationStore(None))["agents"]} == {"muse-spark-1.3"}
     assert not any("claude" in str(a) for a in hello_data(ReputationStore(None))["agents"])

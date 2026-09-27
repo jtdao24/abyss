@@ -11,10 +11,11 @@ import type { EventSource } from "./sources/types";
 import { WsSource } from "./sources/ws";
 import type { MarketState } from "./state/reducer";
 import { store } from "./state/store";
+import { CostCompare } from "./ui/CostCompare";
 import { CostPanel } from "./ui/CostPanel";
 import { McpPanel } from "./ui/McpPanel";
-import { DebugPanel } from "./ui/DebugPanel";
 import { GameDialog } from "./ui/GameDialog";
+import { Ledger } from "./ui/Ledger";
 
 const params = new URLSearchParams(window.location.search);
 const SOURCE = params.get("source") === "fixture" ? "fixture" : "ws"; // live by default; ?source=fixture replays a recording
@@ -166,6 +167,7 @@ export default function App() {
                 {showTools ? "Hide tools" : "Tools"}
               </button>
             )}
+            <CostCompare state={state} />
             <button type="button" className="ledger-toggle" onClick={() => { setShowLedger((v) => !v); setShowTools(false); }}>
               {showLedger ? (rawLedger ? "Hide ledger" : "Hide costs") : rawLedger ? "Show ledger" : "Costs"}
             </button>
@@ -195,7 +197,7 @@ export default function App() {
       {showTools && !showLedger && <McpPanel onClose={() => setShowTools(false)} />}
       {showLedger &&
         (rawLedger || SOURCE !== "ws" ? (
-          <DebugPanel state={state} />
+          <Ledger state={state} />
         ) : (
           <CostPanel state={state} prices={prices} usage={usage} sessions={sessions} onClose={() => setShowLedger(false)} />
         ))}

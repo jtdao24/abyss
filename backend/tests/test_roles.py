@@ -46,7 +46,7 @@ async def test_fake_role_shapes(monkeypatch) -> None:
     tasks, split_usage = await split_job(llm, ledger, "Explain a fact, then check it.")
     assert [task.type for task in tasks] == ["research", "writing", "checking"]
     assert tasks[1].depends_on == ["t1"]
-    assert split_usage["model"] == "gpt-5"
+    assert split_usage["model"] == "gpt-6-sol"
 
     raw_bid, bid_usage = await request_bid(
         llm,
@@ -75,7 +75,7 @@ async def test_fake_role_shapes(monkeypatch) -> None:
     )
     assert 1 <= grade <= 10
     assert rationale
-    assert review_usage["model"] == "gpt-5"
+    assert review_usage["model"] == "gpt-6-sol"
 
 
 @pytest.mark.asyncio

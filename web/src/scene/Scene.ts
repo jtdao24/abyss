@@ -426,7 +426,7 @@ export class MarketScene {
       this.onInteract("tasks");
       return;
     }
-    const thing = hitTest(p);
+    const thing = hitTest(p, this.vendorPositions());
     const dest = standable(thing ? thing.approach : p);
     this.walkTo(dest, thing ? () => this.onInteract(thing.id) : null);
     if (!thing) this.onGround();
@@ -434,8 +434,14 @@ export class MarketScene {
     this.clickAge = 0;
   }
 
+  /** Where each vendor is standing right now (they walk to the boat and the pier). */
+  private vendorPositions(): Partial<Record<AgentId, Point>> {
+    return Object.fromEntries(AGENT_ORDER.map((id) => [id, { x: this.vendors[id].x, y: this.vendors[id].y }]));
+  }
+
   private setHover(p: Point): void {
-    const thing = inPanel(p) ? "tasks" : hitTest(p);
+    // Vendors move, so their box is rebuilt on every call (and the outline follows them).
+    const thing = inPanel(p) ? "tasks" : hitTest(p, this.vendorPositions());
     if (thing === this.hovered) return;
     this.hovered = thing;
     this.app.canvas.style.cursor = thing ? "pointer" : "default";

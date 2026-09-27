@@ -8,6 +8,9 @@ from .ledger import cost_usd
 
 AGENT_ORDER = {agent.agent_id: index for index, agent in enumerate(AGENTS)}
 
+# The `error` of the bid event a premium stall sends while it sits out (ok: false).
+STANDBY = "standby: backup for when the cheaper vendors slip"
+
 
 @dataclass(frozen=True)
 class ScoredBid:
@@ -36,6 +39,14 @@ def score_bid(
         promised_quality * reputation - price_weight * predicted_cost_usd * 100,
         3,
     )
+
+
+def premium_on_standby(cheaper_reputations: list[float], price_weight: float, backup_below: float) -> bool:
+    """The premium stall sits out while any cheaper stall is still trusted on this
+    task type. At price weight 0 only quality counts, so it always bids."""
+    if price_weight <= 0 or not cheaper_reputations:
+        return False
+    return max(cheaper_reputations) >= backup_below
 
 
 def pick_winner(bids: list[ScoredBid]) -> tuple[ScoredBid, ScoredBid | None]:
