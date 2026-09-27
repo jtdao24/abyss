@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, type McpCatalogEntry, type McpOverview, type McpServer } from "../api";
 import type { AgentId } from "../contract";
 import { VENDOR } from "../scene/model";
+import { McpLogo } from "./mcpLogos";
 
 const STATE_LABEL: Record<string, string> = {
   ready: "Connected",
@@ -87,13 +88,20 @@ function ServerCard({ server, run, busy }: { server: McpServer; run: ReturnType<
   return (
     <li className={`mcp-server ${server.state}`}>
       <button type="button" className="mcp-server-head" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
-        <i className="mcp-dot" />
-        <strong>{server.label}</strong>
-        {server.label !== server.name && <small>{server.name}</small>}
-        <em>
+        <McpLogo id={server.catalog} size={30} />
+        <span className="mcp-server-name">
+          <strong>{server.label}</strong>
+          <small>
+            {server.state === "ready"
+              ? `${server.tools.filter((t) => allowed(t.name)).length} of ${server.tools.length} tools on`
+              : server.kind === "remote" ? "remote server" : "local server"}
+          </small>
+        </span>
+        <em className="mcp-pill">
+          <i className="mcp-dot" />
           {STATE_LABEL[server.state] ?? server.state}
-          {server.state === "ready" && ` · ${server.tools.filter((t) => allowed(t.name)).length} tools`}
         </em>
+        <span className={`mcp-caret ${open ? "open" : ""}`} aria-hidden="true">›</span>
       </button>
       {open && (
         <div className="mcp-server-body">
@@ -167,17 +175,33 @@ function CatalogCard({
   return (
     <li className={`mcp-catalog-card ${entry.added ? "added" : ""}`}>
       <div className="mcp-catalog-top">
-        <strong>{entry.label}</strong>
-        <small>{entry.category}</small>
+        <McpLogo id={entry.id} />
+        <span>
+          <strong>{entry.label}</strong>
+          <small>{entry.category}</small>
+        </span>
+        {entry.added && <b className="mcp-check" title="Added">✓</b>}
       </div>
       <p>{entry.description}</p>
+      <div className="mcp-badges">
+        <span>{entry.runtime === "npx" ? "Node" : entry.runtime === "uvx" ? "Python" : "Remote"}</span>
+        {entry.secrets.length === 0 && entry.params.length === 0 ? (
+          <span className="free">No key</span>
+        ) : entry.secrets.length > 0 ? (
+          <span className={entry.secrets.every((k) => k.set) ? "free" : "key"}>
+            {entry.secrets.every((k) => k.set) ? "Key saved" : "Needs key"}
+          </span>
+        ) : (
+          <span>Pick a path</span>
+        )}
+      </div>
       {missingRuntime && (
         <p className="rpg-hint">
           Needs {entry.runtime === "npx" ? <a href="https://nodejs.org" target="_blank" rel="noreferrer">Node.js</a> : <a href="https://docs.astral.sh/uv/" target="_blank" rel="noreferrer">uv</a>} on this computer.
         </p>
       )}
       {entry.added ? (
-        <em className="mcp-added">Added ✓</em>
+        <em className="mcp-added">Connected in your tools</em>
       ) : open ? (
         <form
           className="mcp-keys"
@@ -194,12 +218,17 @@ function CatalogCard({
           ))}
           <KeyInputs keys={entry.secrets} values={keys} onChange={setKeys} />
           <p className="rpg-hint">Keys are saved to backend/.env on this computer only.</p>
-          <button type="submit" className="chip" disabled={busy}>
-            Add {entry.label}
-          </button>
+          <div className="mcp-actions">
+            <button type="submit" className="mcp-add" disabled={busy}>
+              Add {entry.label}
+            </button>
+            <button type="button" className="chip" onClick={() => setOpen(false)}>
+              Cancel
+            </button>
+          </div>
         </form>
       ) : (
-        <button type="button" className="chip" disabled={busy} onClick={() => (needsForm ? setOpen(true) : add())}>
+        <button type="button" className="mcp-add" disabled={busy} onClick={() => (needsForm ? setOpen(true) : add())}>
           + Add
         </button>
       )}
@@ -284,15 +313,21 @@ export function McpPanel({ onClose }: { onClose(): void }) {
         <button type="button" onClick={onClose} aria-label="Hide tools">×</button>
       </header>
 
+      <section className="mcp-hero">
+        <p>Give the vendors real tools: the web, your apps, your files. They call them while they work.</p>
+        <dl>
+          <div><dt>Servers</dt><dd>{ready.length}</dd></div>
+          <div><dt>Tools</dt><dd>{toolCount}</dd></div>
+          <div><dt>Calls</dt><dd>{view?.activity.length ?? 0}</dd></div>
+        </dl>
+      </section>
+
       <section className="cost-card">
-        <h3>Connected</h3>
+        <h3>Your tools</h3>
         {!view ? (
           <p className="cost-note">Loading…</p>
         ) : (
           <>
-            <p className="cost-note">
-              {ready.length} server{ready.length === 1 ? "" : "s"} · {toolCount} tools the vendors can call while they work.
-            </p>
             {view.config_error && <p className="form-error">{view.config_file}: {view.config_error}</p>}
             {view.pending_reload && <p className="rpg-hint">Changes apply when the current session ends.</p>}
             {view.servers.length === 0 ? (
@@ -320,10 +355,13 @@ export function McpPanel({ onClose }: { onClose(): void }) {
           <ul className="mcp-activity">
             {view.activity.map((a, i) => (
               <li key={`${a.t}-${i}`} className={a.ok ? "" : "bad"} title={`${a.args}\n→ ${a.result}`}>
+                <McpLogo id={view.servers.find((s) => s.name === a.server)?.catalog ?? null} size={20} />
+                <code>
+                  <b>{a.server}</b>.{a.tool}
+                </code>
                 {a.agent_id && a.agent_id in VENDOR && (
-                  <span className="stall-dot" style={{ background: VENDOR[a.agent_id as AgentId].color }} />
+                  <small style={{ color: VENDOR[a.agent_id as AgentId].color }}>{VENDOR[a.agent_id as AgentId].name}</small>
                 )}
-                <b>{a.server}</b>.{a.tool}
                 <span>{a.ok ? `${a.ms} ms` : "error"}</span>
               </li>
             ))}
@@ -340,10 +378,16 @@ export function McpPanel({ onClose }: { onClose(): void }) {
               {!view.runtimes.uvx && "uv (uvx) isn't installed, so Python servers won't start."}
             </p>
           )}
-          <input className="link-input mcp-search" value={query} placeholder="Search tools…" onChange={(e) => setQuery(e.target.value)} />
-          <div className="template-row">
+          <label className="mcp-search">
+            <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+              <circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" strokeWidth="2" />
+              <path d="M16 16l5 5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+            </svg>
+            <input value={query} placeholder={`Search ${view.catalog.length} tools…`} onChange={(e) => setQuery(e.target.value)} />
+          </label>
+          <div className="mcp-cats">
             {categories.map((c) => (
-              <button key={c} type="button" className={`chip ${c === category ? "on" : ""}`} onClick={() => setCategory(c)}>
+              <button key={c} type="button" className={c === category ? "on" : ""} onClick={() => setCategory(c)}>
                 {c}
               </button>
             ))}
@@ -354,7 +398,9 @@ export function McpPanel({ onClose }: { onClose(): void }) {
             ))}
           </ul>
           <details className="mcp-custom-wrap">
-            <summary>Any other MCP server…</summary>
+            <summary>
+              <McpLogo id={null} size={22} /> Add any other MCP server
+            </summary>
             <CustomServerForm run={run} busy={busy} />
           </details>
         </section>
